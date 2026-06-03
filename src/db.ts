@@ -1,5 +1,17 @@
 import { DatabaseSync } from "node:sqlite";
-import type { Ticket, TicketStatus, TicketSource, Run, RunStatus, TicketEvent, EventType, Script, ScriptRun } from "./types.ts";
+import type {
+  Ticket,
+  TicketStatus,
+  TicketSource,
+  Run,
+  RunStatus,
+  TicketEvent,
+  EventType,
+  Script,
+  ScriptRun,
+  Person,
+  PersonRole,
+} from "./types.ts";
 
 const db = new DatabaseSync("rex.db");
 
@@ -68,7 +80,91 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS idx_scriptruns_script ON script_runs(script_id);
+
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS people (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    slack_user_id TEXT UNIQUE,
+    name TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'technical',
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
 `);
+
+// --- Settings (key/value, with seeded defaults) ---
+
+export const DEFAULT_PERSONA = `You are Rex, the CTO — a senior engineering leader.
+Talk like a real human CTO: warm, direct, confident, plain-spoken. No corporate filler
+("Great question!", "Certainly!"), no emoji spam, no robotic tone. Lead with the answer.
+Be opinionated and willing to push back when something is a bad idea.`;
+
+export const DEFAULT_STANDARDS = `Engineering standards Rex follows when doing work:
+- Start lean: build the minimum that solves the problem well. Complexity must earn its place.
+- Read existing code before changing it; match the surrounding style.
+- Security first: no injection, XSS, or OWASP top-10 issues.
+- No speculative work or future-proofing that wasn't asked for.
+- Done means demonstrated: verify the change and report how you verified it.`;
+
+function seedSetting(key: string, value: string): void {
+  db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)").run(key, value);
+}
+seedSetting("persona", DEFAULT_PERSONA);
+seedSetting("standards", DEFAULT_STANDARDS);
+
+export function getSetting(key: string, fallback = ""): string {
+  const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined;
+  return row ? row.value : fallback;
+}
+
+export function setSetting(key: string, value: string): void {
+  db.prepare(
+    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
+  ).run(key, value);
+}
+
+export function allSettings(): Record<string, string> {
+  const rows = db.prepare("SELECT key, value FROM settings").all() as { key: string; value: string }[];
+  return Object.fromEntries(rows.map((r) => [r.key, r.value]));
+}
+
+// --- People (team profiles) ---
+
+export function createPerson(input: { name: string; role: PersonRole; slack_user_id?: string | null; notes?: string }): Person {
+  const info = db
+    .prepare("INSERT INTO people (name, role, slack_user_id, notes) VALUES (?, ?, ?, ?)")
+    .run(input.name, input.role, input.slack_user_id || null, input.notes ?? "");
+  return getPerson(Number(info.lastInsertRowid))!;
+}
+
+export function getPerson(id: number): Person | undefined {
+  return db.prepare("SELECT * FROM people WHERE id = ?").get(id) as unknown as Person | undefined;
+}
+
+export function getPersonBySlackId(slackId: string): Person | undefined {
+  return db.prepare("SELECT * FROM people WHERE slack_user_id = ?").get(slackId) as unknown as Person | undefined;
+}
+
+export function listPeople(): Person[] {
+  return db.prepare("SELECT * FROM people ORDER BY name ASC").all() as unknown as Person[];
+}
+
+export function updatePerson(id: number, input: { name: string; role: PersonRole; slack_user_id?: string | null; notes?: string }): Person | undefined {
+  db.prepare(
+    "UPDATE people SET name = ?, role = ?, slack_user_id = ?, notes = ?, updated_at = datetime('now') WHERE id = ?",
+  ).run(input.name, input.role, input.slack_user_id || null, input.notes ?? "", id);
+  return getPerson(id);
+}
+
+export function deletePerson(id: number): void {
+  db.prepare("DELETE FROM people WHERE id = ?").run(id);
+}
 
 // --- Tickets ---
 

@@ -1,6 +1,7 @@
 import { query, type AgentDefinition } from "@anthropic-ai/claude-agent-sdk";
 import { config } from "./config.ts";
-import type { Ticket, EventType } from "./types.ts";
+import { getSetting } from "./db.ts";
+import type { Ticket, EventType, PersonRole } from "./types.ts";
 
 export interface RunOutcome {
   ok: boolean;
@@ -46,34 +47,40 @@ export type Triage =
   | { kind: "task"; title: string; description: string }
   | { kind: "chat"; reply: string };
 
-const TRIAGE_SYSTEM = `You are Rex, the CTO — a senior engineering leader — talking to a colleague on Slack.
-Decide whether the message is a request to do actual software work (something you'd file as a
-ticket and execute in a codebase) or just conversation.
+const ROUTING_RULES = `Decide whether the message is a request to do actual software work (something
+you'd file as a ticket and execute in a codebase) or just conversation.
 
 Reply in EXACTLY one of these formats, nothing else:
 TASK :: <short imperative title> :: <one-line description of the work>
 CHAT :: <your reply>
 
-When you reply CHAT, talk like a real human CTO: warm, direct, confident, plain-spoken.
-No corporate filler ("Great question!", "Certainly!"), no emoji spam, no robotic tone.
-Adapt to WHO you're talking to, inferred from how they write:
-- If they sound business / non-technical (asking about outcomes, timelines, cost, status,
-  "can we…", with no code or engineering jargon): answer in plain business language. Lead with
-  the outcome and the bottom line. Do NOT go technical unless they ask for it.
-- If they sound technical (mention code, architecture, specific tools/errors, use engineering
-  jargon): match them — give precise, substantive technical depth.
-Keep it short (1–4 sentences) unless real detail is genuinely needed.
-
 Greetings, small talk, status/role questions, and "what can you do" are CHAT.
-"add/fix/build/refactor/implement <something in code>" is TASK.`;
+"add/fix/build/refactor/implement <something in code>" is TASK.
+When you reply CHAT, keep it short (1–4 sentences) unless real detail is genuinely needed.`;
 
-/** Classify a Slack message as work-to-do or conversation (cheap Haiku call). */
-export async function triage(message: string): Promise<Triage> {
+const AUDIENCE_GUIDE = `Adapt every CHAT reply to your audience:
+- Business / non-technical (outcomes, timelines, cost, status, no jargon): plain business
+  language, lead with the bottom line, no technical detail unless they ask.
+- Technical (code, architecture, tools, errors, jargon): match them with precise technical depth.`;
+
+export interface SpeakerProfile {
+  name: string;
+  role: PersonRole;
+  notes?: string;
+}
+
+/** Classify a Slack message as work-to-do or conversation, in Rex's configured voice. */
+export async function triage(message: string, profile?: SpeakerProfile): Promise<Triage> {
+  const persona = getSetting("persona", "You are Rex, the CTO — a senior engineering leader.");
+  const profileLine = profile
+    ? `You are talking to ${profile.name}, whose role is "${profile.role}".${profile.notes ? " Notes: " + profile.notes : ""} Tailor your reply to them specifically.`
+    : "Infer the audience (business vs technical) from how they write.";
+  const system = `${persona}\n\n${ROUTING_RULES}\n\n${AUDIENCE_GUIDE}\n\n${profileLine}`;
   let out = "";
   try {
     for await (const m of query({
       prompt: message,
-      options: { model: "haiku", systemPrompt: TRIAGE_SYSTEM, allowedTools: [], maxTurns: 1 },
+      options: { model: "haiku", systemPrompt: system, allowedTools: [], maxTurns: 1 },
     })) {
       if (m.type === "result") out = ((m as any).result ?? "").trim();
     }
@@ -118,7 +125,11 @@ Work this ticket to completion in the current repository.`;
         // Autonomy with guardrails: Rex can do its job, but cannot push or nuke the repo.
         disallowedTools: ["Bash(git push:*)", "Bash(rm -rf:*)", "Bash(git reset --hard:*)"],
         agents: SUBAGENTS,
-        systemPrompt: { type: "preset", preset: "claude_code", append: REX_PERSONA },
+        systemPrompt: {
+          type: "preset",
+          preset: "claude_code",
+          append: `${REX_PERSONA}\n\n## Team standards & project knowledge\n${getSetting("standards", "")}`,
+        },
       },
     })) {
       switch (message.type) {

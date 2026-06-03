@@ -1,6 +1,6 @@
 import { App } from "@slack/bolt";
 import { config } from "./config.ts";
-import { createTicket } from "./db.ts";
+import { createTicket, getPersonBySlackId } from "./db.ts";
 import { triage } from "./rex.ts";
 import type { Ticket } from "./types.ts";
 
@@ -85,7 +85,10 @@ async function handleInbound(args: {
   }
 
   // Otherwise let Rex decide: real work -> ticket, conversation -> reply.
-  const decision = await triage(text);
+  // If we know who this is (team profile), pass their role so Rex adapts deterministically.
+  const person = getPersonBySlackId(args.user);
+  const profile = person ? { name: person.name, role: person.role, notes: person.notes } : undefined;
+  const decision = await triage(text, profile);
   if (decision.kind === "chat") {
     await args.say({ thread_ts: args.threadTs, text: decision.reply });
     return;

@@ -32,6 +32,18 @@ export interface Run {
   finished_at: string | null;
 }
 
+export type PersonRole = "exec" | "business" | "technical";
+
+export interface Person {
+  id: number;
+  slack_user_id: string | null;
+  name: string;
+  role: PersonRole;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Script {
   id: number;
   name: string;

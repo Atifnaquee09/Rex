@@ -17,8 +17,18 @@ import {
   deleteScript,
   addScriptRun,
   listScriptRuns,
+  allSettings,
+  setSetting,
+  createPerson,
+  getPerson,
+  listPeople,
+  updatePerson,
+  deletePerson,
 } from "./db.ts";
 import { runScript } from "./scripts.ts";
+import type { PersonRole } from "./types.ts";
+
+const ROLES: PersonRole[] = ["exec", "business", "technical"];
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -135,6 +145,68 @@ export function startServer(): void {
     const result = await runScript(script.body);
     const run = addScriptRun({ script_id: script.id, ...result });
     res.json(run);
+  });
+
+  // --- Settings (persona, standards) ---
+
+  app.get("/api/settings", (_req, res) => {
+    res.json(allSettings());
+  });
+
+  app.put("/api/settings", (req, res) => {
+    const body = req.body ?? {};
+    for (const key of ["persona", "standards"]) {
+      if (typeof body[key] === "string") setSetting(key, body[key]);
+    }
+    res.json(allSettings());
+  });
+
+  // --- Team profiles ---
+
+  const parsePerson = (b: any) => ({
+    name: String(b?.name ?? "").trim(),
+    role: (ROLES.includes(b?.role) ? b.role : "technical") as PersonRole,
+    slack_user_id: b?.slack_user_id ? String(b.slack_user_id).trim() : null,
+    notes: typeof b?.notes === "string" ? b.notes : "",
+  });
+
+  app.get("/api/people", (_req, res) => {
+    res.json(listPeople());
+  });
+
+  app.post("/api/people", (req, res) => {
+    const p = parsePerson(req.body);
+    if (!p.name) {
+      res.status(400).json({ error: "name is required" });
+      return;
+    }
+    try {
+      res.status(201).json(createPerson(p));
+    } catch {
+      res.status(409).json({ error: "that Slack user ID is already mapped to someone" });
+    }
+  });
+
+  app.put("/api/people/:id", (req, res) => {
+    if (!getPerson(Number(req.params.id))) {
+      res.status(404).json({ error: "not found" });
+      return;
+    }
+    const p = parsePerson(req.body);
+    if (!p.name) {
+      res.status(400).json({ error: "name is required" });
+      return;
+    }
+    try {
+      res.json(updatePerson(Number(req.params.id), p));
+    } catch {
+      res.status(409).json({ error: "that Slack user ID is already mapped to someone" });
+    }
+  });
+
+  app.delete("/api/people/:id", (req, res) => {
+    deletePerson(Number(req.params.id));
+    res.json({ ok: true });
   });
 
   app.listen(config.port, config.host, () => {
