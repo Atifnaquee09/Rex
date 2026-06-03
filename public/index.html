@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rex — Command Deck</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+    .scroll::-webkit-scrollbar { width: 8px; }
+    .scroll::-webkit-scrollbar-thumb { background: #27272a; border-radius: 8px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  </style>
+</head>
+<body class="bg-zinc-950 text-zinc-200 min-h-screen">
+  <div class="max-w-7xl mx-auto p-6">
+    <!-- Header -->
+    <header class="flex items-center justify-between mb-6">
+      <div class="flex items-center gap-3">
+        <div class="h-10 w-10 rounded-lg bg-gradient-to-br from-indigo-500 to-fuchsia-600 grid place-items-center font-black text-white">R</div>
+        <div>
+          <h1 class="text-xl font-bold text-white leading-none">Rex — Command Deck</h1>
+          <p class="text-xs text-zinc-500 mt-1">Autonomous Senior Engineer · ticket queue + token burn</p>
+        </div>
+      </div>
+      <div class="text-right">
+        <div class="text-2xl font-bold text-emerald-400 mono" id="stat-cost">$0.0000</div>
+        <div class="text-xs text-zinc-500">total spend</div>
+      </div>
+    </header>
+
+    <!-- Stat strip -->
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6" id="stat-strip">
+      <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+        <div class="text-[11px] uppercase tracking-wide text-zinc-500">Input tokens</div>
+        <div class="text-lg font-semibold text-white mono" id="stat-in">0</div>
+      </div>
+      <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+        <div class="text-[11px] uppercase tracking-wide text-zinc-500">Output tokens</div>
+        <div class="text-lg font-semibold text-white mono" id="stat-out">0</div>
+      </div>
+      <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+        <div class="text-[11px] uppercase tracking-wide text-zinc-500">Cache read</div>
+        <div class="text-lg font-semibold text-white mono" id="stat-cache">0</div>
+      </div>
+      <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+        <div class="text-[11px] uppercase tracking-wide text-zinc-500">Runs</div>
+        <div class="text-lg font-semibold text-white mono" id="stat-runs">0</div>
+      </div>
+      <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+        <div class="text-[11px] uppercase tracking-wide text-zinc-500">Status</div>
+        <div class="text-xs mt-1 text-zinc-300" id="stat-status">—</div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
+      <!-- Left: create + list -->
+      <div class="lg:col-span-2 space-y-4">
+        <!-- Create -->
+        <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+          <h2 class="text-sm font-semibold text-white mb-3">Assign a ticket to Rex</h2>
+          <input id="t-title" placeholder="Title — e.g. Fix SSO redirect to 404"
+            class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm mb-2 outline-none focus:border-indigo-500" />
+          <textarea id="t-desc" rows="3" placeholder="Description / acceptance criteria"
+            class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm mb-2 outline-none focus:border-indigo-500"></textarea>
+          <label class="flex items-center gap-2 text-xs text-zinc-400 mb-3">
+            <input type="checkbox" id="t-assign" checked class="accent-indigo-500" />
+            Queue for Rex immediately
+          </label>
+          <button id="t-submit"
+            class="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg py-2 transition">
+            Create ticket
+          </button>
+        </div>
+
+        <!-- List -->
+        <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+          <h2 class="text-sm font-semibold text-white mb-3">Tickets</h2>
+          <div id="ticket-list" class="space-y-2 max-h-[55vh] overflow-y-auto scroll pr-1">
+            <p class="text-xs text-zinc-600">No tickets yet.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: detail -->
+      <div class="lg:col-span-3">
+        <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-4 h-full">
+          <div id="detail-empty" class="text-sm text-zinc-600 grid place-items-center h-64">
+            Select a ticket to watch Rex work.
+          </div>
+          <div id="detail" class="hidden">
+            <div class="flex items-start justify-between mb-3">
+              <div>
+                <h2 id="d-title" class="text-base font-semibold text-white"></h2>
+                <p id="d-meta" class="text-xs text-zinc-500 mt-1"></p>
+              </div>
+              <span id="d-status" class="text-[11px] px-2 py-1 rounded-full"></span>
+            </div>
+            <p id="d-desc" class="text-sm text-zinc-400 mb-3 whitespace-pre-wrap"></p>
+            <div id="d-run" class="text-xs text-zinc-400 mono mb-3"></div>
+            <div class="text-[11px] uppercase tracking-wide text-zinc-500 mb-2">Live activity</div>
+            <div id="d-log" class="bg-zinc-950 border border-zinc-800 rounded-lg p-3 h-[50vh] overflow-y-auto scroll space-y-2 text-xs"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const fmt = (n) => Number(n || 0).toLocaleString();
+    const STATUS_COLORS = {
+      open: "bg-zinc-700 text-zinc-200",
+      assigned: "bg-amber-500/20 text-amber-300",
+      in_progress: "bg-indigo-500/20 text-indigo-300 animate-pulse",
+      done: "bg-emerald-500/20 text-emerald-300",
+      failed: "bg-rose-500/20 text-rose-300",
+    };
+    const EVENT_COLORS = {
+      assistant: "text-zinc-300",
+      tool: "text-sky-400",
+      system: "text-zinc-500",
+      result: "text-emerald-400",
+      error: "text-rose-400",
+      thinking: "text-fuchsia-400",
+    };
+
+    let selectedId = null;
+    let lastEventId = 0;
+
+    async function refreshStats() {
+      const s = await fetch("/api/stats").then((r) => r.json());
+      document.getElementById("stat-cost").textContent = "$" + Number(s.totals.cost_usd).toFixed(4);
+      document.getElementById("stat-in").textContent = fmt(s.totals.input_tokens);
+      document.getElementById("stat-out").textContent = fmt(s.totals.output_tokens);
+      document.getElementById("stat-cache").textContent = fmt(s.totals.cache_read_tokens);
+      document.getElementById("stat-runs").textContent = fmt(s.totals.runs);
+      document.getElementById("stat-status").textContent =
+        s.byStatus.map((x) => `${x.n} ${x.status}`).join(" · ") || "—";
+    }
+
+    async function refreshList() {
+      const tickets = await fetch("/api/tickets").then((r) => r.json());
+      const el = document.getElementById("ticket-list");
+      if (!tickets.length) { el.innerHTML = '<p class="text-xs text-zinc-600">No tickets yet.</p>'; return; }
+      el.innerHTML = tickets.map((t) => `
+        <div data-id="${t.id}" class="ticket-card cursor-pointer rounded-lg border px-3 py-2 transition ${
+          t.id === selectedId ? "border-indigo-500 bg-zinc-800/60" : "border-zinc-800 hover:border-zinc-700"
+        }">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-sm text-white truncate">#${t.id} ${escapeHtml(t.title)}</span>
+            <span class="text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap ${STATUS_COLORS[t.status] || ""}">${t.status}</span>
+          </div>
+          <div class="flex items-center justify-between mt-1">
+            <span class="text-[10px] text-zinc-600">${t.source}</span>
+            ${["open"].includes(t.status) ? `<button data-assign="${t.id}" class="text-[10px] text-indigo-400 hover:text-indigo-300">Assign →</button>` : ""}
+          </div>
+        </div>`).join("");
+
+      el.querySelectorAll(".ticket-card").forEach((c) =>
+        c.addEventListener("click", (e) => {
+          if (e.target.dataset.assign) return;
+          select(Number(c.dataset.id));
+        }),
+      );
+      el.querySelectorAll("[data-assign]").forEach((b) =>
+        b.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          await fetch(`/api/tickets/${b.dataset.assign}/assign`, { method: "POST" });
+          refreshList();
+        }),
+      );
+    }
+
+    async function select(id) {
+      if (id !== selectedId) { selectedId = id; lastEventId = 0; document.getElementById("d-log").innerHTML = ""; }
+      document.getElementById("detail-empty").classList.add("hidden");
+      document.getElementById("detail").classList.remove("hidden");
+      await refreshDetail();
+      refreshList();
+    }
+
+    async function refreshDetail() {
+      if (!selectedId) return;
+      const data = await fetch(`/api/tickets/${selectedId}?afterEvent=${lastEventId}`).then((r) => r.json());
+      const t = data.ticket;
+      document.getElementById("d-title").textContent = `#${t.id} ${t.title}`;
+      document.getElementById("d-meta").textContent = `${t.source} · created ${t.created_at} · by ${t.created_by}`;
+      document.getElementById("d-desc").textContent = t.description || "";
+      const badge = document.getElementById("d-status");
+      badge.textContent = t.status;
+      badge.className = "text-[11px] px-2 py-1 rounded-full " + (STATUS_COLORS[t.status] || "");
+
+      const run = data.runs[data.runs.length - 1];
+      document.getElementById("d-run").textContent = run
+        ? `run #${run.id} · ${run.model} · in ${fmt(run.input_tokens)} / out ${fmt(run.output_tokens)} · cache ${fmt(run.cache_read_tokens)} · $${Number(run.cost_usd).toFixed(4)} · ${run.num_turns} turns`
+        : "no run yet";
+
+      const log = document.getElementById("d-log");
+      for (const ev of data.events) {
+        lastEventId = Math.max(lastEventId, ev.id);
+        const row = document.createElement("div");
+        row.className = EVENT_COLORS[ev.type] || "text-zinc-300";
+        row.innerHTML = `<span class="text-zinc-600 mono">[${ev.type}]</span> <span class="whitespace-pre-wrap">${escapeHtml(ev.content)}</span>`;
+        log.appendChild(row);
+      }
+      if (data.events.length) log.scrollTop = log.scrollHeight;
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+
+    document.getElementById("t-submit").addEventListener("click", async () => {
+      const title = document.getElementById("t-title").value.trim();
+      if (!title) return;
+      const body = {
+        title,
+        description: document.getElementById("t-desc").value.trim(),
+        assign: document.getElementById("t-assign").checked,
+      };
+      const ticket = await fetch("/api/tickets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }).then((r) => r.json());
+      document.getElementById("t-title").value = "";
+      document.getElementById("t-desc").value = "";
+      await refreshList();
+      select(ticket.id);
+    });
+
+    function loop() { refreshStats(); refreshList(); if (selectedId) refreshDetail(); }
+    refreshStats(); refreshList();
+    setInterval(loop, 3000);
+  </script>
+</body>
+</html>
