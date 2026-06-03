@@ -69,6 +69,7 @@ async function handleInbound(args: {
   channel: string;
   threadTs: string;
   user: string;
+  botUserId?: string;
   say: (msg: any) => Promise<any>;
 }): Promise<void> {
   const text = stripMention(args.text);
@@ -84,11 +85,26 @@ async function handleInbound(args: {
     return;
   }
 
-  // Otherwise let Rex decide: real work -> ticket, conversation -> reply.
+  // Otherwise let Rex decide: real work -> ticket, relay -> notify a person, conversation -> reply.
   // If we know who this is (team profile), pass their role so Rex adapts deterministically.
   const person = getPersonBySlackId(args.user);
   const profile = person ? { name: person.name, role: person.role, notes: person.notes } : undefined;
   const decision = await triage(text, profile);
+
+  if (decision.kind === "relay") {
+    // Targets = everyone @-mentioned in the raw message except Rex and the sender.
+    const targets = [...args.text.matchAll(/<@([A-Z0-9]+)>/g)]
+      .map((m) => m[1])
+      .filter((id) => id !== args.botUserId && id !== args.user);
+    if (!targets.length) {
+      await args.say({ thread_ts: args.threadTs, text: "Who should I tell? @-mention them and I'll pass it along." });
+      return;
+    }
+    const mentions = targets.map((id) => `<@${id}>`).join(" ");
+    await args.say({ thread_ts: args.threadTs, text: `${mentions} — :speech_balloon: from <@${args.user}>: ${decision.message}` });
+    return;
+  }
+
   if (decision.kind === "chat") {
     await args.say({ thread_ts: args.threadTs, text: decision.reply });
     return;
@@ -110,19 +126,20 @@ export async function startSlack(): Promise<void> {
   });
 
   // @Rex in a channel
-  app.event("app_mention", async ({ event, say }: any) => {
+  app.event("app_mention", async ({ event, context, say }: any) => {
     const e = event as any;
     await handleInbound({
       text: e.text ?? "",
       channel: e.channel,
       threadTs: e.thread_ts ?? e.ts,
       user: e.user ?? "unknown",
+      botUserId: context?.botUserId,
       say,
     });
   });
 
   // Direct messages to Rex
-  app.message(async ({ message, say }: any) => {
+  app.message(async ({ message, context, say }: any) => {
     const m = message as any;
     if (m.subtype || m.bot_id) return; // ignore bot/system messages
     if (m.channel_type !== "im") return; // only DMs here; channel use goes through app_mention
@@ -131,6 +148,7 @@ export async function startSlack(): Promise<void> {
       channel: m.channel,
       threadTs: m.thread_ts ?? m.ts,
       user: m.user ?? "unknown",
+      botUserId: context?.botUserId,
       say,
     });
   });

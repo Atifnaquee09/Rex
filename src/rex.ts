@@ -45,17 +45,21 @@ const SUBAGENTS: Record<string, AgentDefinition> = {
 
 export type Triage =
   | { kind: "task"; title: string; description: string }
-  | { kind: "chat"; reply: string };
+  | { kind: "chat"; reply: string }
+  | { kind: "relay"; message: string };
 
 const ROUTING_RULES = `Decide whether the message is a request to do actual software work (something
 you'd file as a ticket and execute in a codebase) or just conversation.
 
 Reply in EXACTLY one of these formats, nothing else:
 TASK :: <short imperative title> :: <one-line description of the work>
+RELAY :: <the message to pass along, phrased as a clear heads-up>
 CHAT :: <your reply>
 
-Greetings, small talk, status/role questions, and "what can you do" are CHAT.
-"add/fix/build/refactor/implement <something in code>" is TASK.
+- "add/fix/build/refactor/implement <something in code>" is TASK.
+- RELAY only when the user explicitly asks you to tell / notify / remind / message / ping
+  another person (e.g. "tell @Sara that…", "remind the team to…"). Write the note to deliver.
+- Greetings, small talk, status/role questions, and "what can you do" are CHAT.
 When you reply CHAT, keep it short (1–4 sentences) unless real detail is genuinely needed.`;
 
 const AUDIENCE_GUIDE = `Adapt every CHAT reply to your audience:
@@ -90,6 +94,9 @@ export async function triage(message: string, profile?: SpeakerProfile): Promise
   if (/^TASK\s*::/i.test(out)) {
     const parts = out.split("::").map((s) => s.trim());
     return { kind: "task", title: parts[1] || message.slice(0, 80), description: parts[2] || "" };
+  }
+  if (/^RELAY\s*::/i.test(out)) {
+    return { kind: "relay", message: out.replace(/^RELAY\s*::\s*/i, "").trim() || message };
   }
   const reply = out.replace(/^CHAT\s*::\s*/i, "").trim();
   return { kind: "chat", reply: reply || "Hey — I'm Rex. Tell me what to build or fix and I'll take it from there." };
