@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import type { Ticket, TicketStatus, TicketSource, Run, RunStatus, TicketEvent, EventType } from "./types.ts";
+import type { Ticket, TicketStatus, TicketSource, Run, RunStatus, TicketEvent, EventType, Script, ScriptRun } from "./types.ts";
 
 const db = new DatabaseSync("rex.db");
 
@@ -46,6 +46,28 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_events_ticket ON events(ticket_id);
   CREATE INDEX IF NOT EXISTS idx_runs_ticket ON runs(ticket_id);
+
+  CREATE TABLE IF NOT EXISTS scripts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    body TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS script_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    script_id INTEGER NOT NULL,
+    exit_code INTEGER NOT NULL DEFAULT 0,
+    stdout TEXT NOT NULL DEFAULT '',
+    stderr TEXT NOT NULL DEFAULT '',
+    duration_ms INTEGER NOT NULL DEFAULT 0,
+    timed_out INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_scriptruns_script ON script_runs(script_id);
 `);
 
 // --- Tickets ---
@@ -181,6 +203,60 @@ export function stats() {
     n: number;
   }[];
   return { totals, byStatus };
+}
+
+// --- Scripts ---
+
+export function createScript(input: { name: string; description?: string; body: string }): Script {
+  const info = db
+    .prepare("INSERT INTO scripts (name, description, body) VALUES (?, ?, ?)")
+    .run(input.name, input.description ?? "", input.body);
+  return getScript(Number(info.lastInsertRowid))!;
+}
+
+export function getScript(id: number): Script | undefined {
+  return db.prepare("SELECT * FROM scripts WHERE id = ?").get(id) as unknown as Script | undefined;
+}
+
+export function listScripts(): Script[] {
+  return db.prepare("SELECT * FROM scripts ORDER BY name ASC").all() as unknown as Script[];
+}
+
+export function updateScript(id: number, input: { name: string; description?: string; body: string }): Script | undefined {
+  db.prepare("UPDATE scripts SET name = ?, description = ?, body = ?, updated_at = datetime('now') WHERE id = ?").run(
+    input.name,
+    input.description ?? "",
+    input.body,
+    id,
+  );
+  return getScript(id);
+}
+
+export function deleteScript(id: number): void {
+  db.prepare("DELETE FROM scripts WHERE id = ?").run(id);
+  db.prepare("DELETE FROM script_runs WHERE script_id = ?").run(id);
+}
+
+export function addScriptRun(input: {
+  script_id: number;
+  exit_code: number;
+  stdout: string;
+  stderr: string;
+  duration_ms: number;
+  timed_out: boolean;
+}): ScriptRun {
+  const info = db
+    .prepare(
+      "INSERT INTO script_runs (script_id, exit_code, stdout, stderr, duration_ms, timed_out) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .run(input.script_id, input.exit_code, input.stdout, input.stderr, input.duration_ms, input.timed_out ? 1 : 0);
+  return db.prepare("SELECT * FROM script_runs WHERE id = ?").get(Number(info.lastInsertRowid)) as unknown as ScriptRun;
+}
+
+export function listScriptRuns(script_id: number, limit = 20): ScriptRun[] {
+  return db
+    .prepare("SELECT * FROM script_runs WHERE script_id = ? ORDER BY id DESC LIMIT ?")
+    .all(script_id, limit) as unknown as ScriptRun[];
 }
 
 export { db };

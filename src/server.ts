@@ -10,7 +10,15 @@ import {
   listEvents,
   listRunsForTicket,
   stats,
+  createScript,
+  getScript,
+  listScripts,
+  updateScript,
+  deleteScript,
+  addScriptRun,
+  listScriptRuns,
 } from "./db.ts";
+import { runScript } from "./scripts.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -72,6 +80,61 @@ export function startServer(): void {
   // Token burn + cost + counts
   app.get("/api/stats", (_req, res) => {
     res.json(stats());
+  });
+
+  // --- Shell scripts ---
+
+  app.get("/api/scripts", (_req, res) => {
+    res.json(listScripts());
+  });
+
+  app.post("/api/scripts", (req, res) => {
+    const { name, description, body } = req.body ?? {};
+    if (!name || typeof name !== "string") {
+      res.status(400).json({ error: "name is required" });
+      return;
+    }
+    res.status(201).json(createScript({ name: name.trim(), description: description ?? "", body: body ?? "" }));
+  });
+
+  app.get("/api/scripts/:id", (req, res) => {
+    const script = getScript(Number(req.params.id));
+    if (!script) {
+      res.status(404).json({ error: "not found" });
+      return;
+    }
+    res.json({ script, runs: listScriptRuns(script.id) });
+  });
+
+  app.put("/api/scripts/:id", (req, res) => {
+    const { name, description, body } = req.body ?? {};
+    if (!name || typeof name !== "string") {
+      res.status(400).json({ error: "name is required" });
+      return;
+    }
+    const updated = updateScript(Number(req.params.id), { name: name.trim(), description: description ?? "", body: body ?? "" });
+    if (!updated) {
+      res.status(404).json({ error: "not found" });
+      return;
+    }
+    res.json(updated);
+  });
+
+  app.delete("/api/scripts/:id", (req, res) => {
+    deleteScript(Number(req.params.id));
+    res.json({ ok: true });
+  });
+
+  // Execute a saved script (runs as the rex user, 60s timeout, output capped)
+  app.post("/api/scripts/:id/run", async (req, res) => {
+    const script = getScript(Number(req.params.id));
+    if (!script) {
+      res.status(404).json({ error: "not found" });
+      return;
+    }
+    const result = await runScript(script.body);
+    const run = addScriptRun({ script_id: script.id, ...result });
+    res.json(run);
   });
 
   app.listen(config.port, config.host, () => {

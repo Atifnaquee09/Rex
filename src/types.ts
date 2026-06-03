@@ -32,6 +32,26 @@ export interface Run {
   finished_at: string | null;
 }
 
+export interface Script {
+  id: number;
+  name: string;
+  description: string;
+  body: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ScriptRun {
+  id: number;
+  script_id: number;
+  exit_code: number;
+  stdout: string;
+  stderr: string;
+  duration_ms: number;
+  timed_out: number;
+  created_at: string;
+}
+
 export type EventType = "thinking" | "assistant" | "tool" | "system" | "result" | "error";
 
 export interface TicketEvent {
