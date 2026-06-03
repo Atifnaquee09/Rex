@@ -74,17 +74,20 @@ export interface SpeakerProfile {
 }
 
 /** Classify a Slack message as work-to-do or conversation, in Rex's configured voice. */
-export async function triage(message: string, profile?: SpeakerProfile): Promise<Triage> {
+export async function triage(message: string, profile?: SpeakerProfile, context?: string): Promise<Triage> {
   const persona = getSetting("persona", "You are Rex, the CTO — a senior engineering leader.");
   const profileLine = profile
-    ? `You are talking to ${profile.name}, whose role is "${profile.role}".${profile.notes ? " Notes: " + profile.notes : ""} Tailor your reply to them specifically.`
+    ? `The person who just wrote is ${profile.name}, whose role is "${profile.role}".${profile.notes ? " Notes: " + profile.notes : ""} Tailor your reply to them specifically.`
     : "Infer the audience (business vs technical) from how they write.";
-  const system = `${persona}\n\n${ROUTING_RULES}\n\n${AUDIENCE_GUIDE}\n\n${profileLine}`;
+  const contextBlock = context
+    ? `\n\n--- Conversation so far (oldest first; the last line is what you're replying to) ---\n${context}\n--- end conversation ---\nUse this context. Do not ask about things it already makes clear.`
+    : "";
+  const system = `${persona}\n\n${ROUTING_RULES}\n\n${AUDIENCE_GUIDE}\n\n${profileLine}${contextBlock}`;
   let out = "";
   try {
     for await (const m of query({
       prompt: message,
-      options: { model: "haiku", systemPrompt: system, allowedTools: [], maxTurns: 1 },
+      options: { model: "sonnet", systemPrompt: system, allowedTools: [], maxTurns: 1 },
     })) {
       if (m.type === "result") out = ((m as any).result ?? "").trim();
     }

@@ -23,6 +23,42 @@ export async function notifySlack(ticket: Ticket, text: string): Promise<void> {
   }
 }
 
+// Resolve a Slack user id to a readable label: known team profile > Slack display name > generic.
+const nameCache = new Map<string, string>();
+async function userLabel(uid: string, botUserId?: string): Promise<string> {
+  if (uid === botUserId) return "Rex (you)";
+  const p = getPersonBySlackId(uid);
+  if (p) return `${p.name} (${p.role})`;
+  if (nameCache.has(uid)) return nameCache.get(uid)!;
+  try {
+    const r: any = await app!.client.users.info({ user: uid });
+    const name = r.user?.profile?.real_name || r.user?.real_name || r.user?.name || "teammate";
+    nameCache.set(uid, name);
+    return name;
+  } catch {
+    return "teammate";
+  }
+}
+
+// Pull the thread transcript so Rex can reply with full conversation context.
+// Needs channels:history / groups:history scope; degrades to "" if unavailable.
+async function threadContext(channel: string, threadTs: string, botUserId?: string): Promise<string> {
+  if (!app) return "";
+  try {
+    const res: any = await app.client.conversations.replies({ channel, ts: threadTs, limit: 20 });
+    const lines: string[] = [];
+    for (const m of res.messages ?? []) {
+      const uid = m.user || (m.bot_id ? botUserId : undefined);
+      const text = stripMention(m.text || "").trim();
+      if (!text) continue;
+      lines.push(`${uid ? await userLabel(uid, botUserId) : "someone"}: ${text}`);
+    }
+    return lines.join("\n");
+  } catch {
+    return "";
+  }
+}
+
 function stripMention(text: string): string {
   return text.replace(/<@[^>]+>/g, "").trim();
 }
@@ -112,7 +148,8 @@ async function handleInbound(args: {
   // If we know who this is (team profile), pass their role so Rex adapts deterministically.
   const person = getPersonBySlackId(args.user);
   const profile = person ? { name: person.name, role: person.role, notes: person.notes } : undefined;
-  const decision = await triage(text, profile);
+  const context = await threadContext(args.channel, args.threadTs, args.botUserId);
+  const decision = await triage(text, profile, context);
 
   if (decision.kind === "relay") {
     // Targets = everyone @-mentioned in the raw message except Rex and the sender.
