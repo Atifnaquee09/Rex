@@ -151,6 +151,64 @@ ${message}`
   return { kind: "chat", reply: reply || "Hey — I'm Rex. Tell me what to build or fix and I'll take it from there." };
 }
 
+export type AdminIntent =
+  | { action: "none" }
+  | { action: "create_channel"; name: string; private: boolean; inviteUserIds: string[]; inviteRole: string }
+  | { action: "archive_channel"; channelId: string }
+  | { action: "invite_users"; userIds: string[]; role: string }
+  | { action: "kick_users"; userIds: string[]; role: string };
+
+const ADMIN_SYSTEM = `You convert a Slack workspace-management request into ONE JSON object. Output JSON only, no prose.
+
+The message may contain Slack mentions: <@U123> is a user id, <#C123|name> is a channel id.
+
+Shapes (pick one):
+{"action":"create_channel","name":"channel-name","private":false,"inviteUserIds":["U.."],"inviteRole":"developer"}
+{"action":"archive_channel","channelId":"C.. or empty for the current channel"}
+{"action":"invite_users","userIds":["U.."],"role":"developer or empty"}
+{"action":"kick_users","userIds":["U.."],"role":"developer or empty"}
+{"action":"none"}
+
+Rules:
+- Extract user ids from <@...>. Put job-title words ("developers","designers","engineers") into the role/inviteRole field, singular and lowercase ("developer").
+- "none" if it is NOT about managing channels/members — e.g. "add a divide function to the code" is none (that's coding work, not a member).
+- Tolerate typos ("chanel"→channel, "devloper"→developer).`;
+
+/** Extract a structured channel/member admin action from a natural-language request. */
+export async function parseAdminIntent(rawMessage: string): Promise<AdminIntent> {
+  let out = "";
+  try {
+    for await (const m of query({
+      prompt: rawMessage,
+      options: { model: "haiku", systemPrompt: ADMIN_SYSTEM, allowedTools: [], maxTurns: 1 },
+    })) {
+      if (m.type === "result") out = ((m as any).result ?? "").trim();
+    }
+  } catch {
+    return { action: "none" };
+  }
+  const match = out.match(/\{[\s\S]*\}/);
+  if (!match) return { action: "none" };
+  try {
+    const j = JSON.parse(match[0]);
+    const ids = (v: any) => (Array.isArray(v) ? v.map(String) : []);
+    switch (j.action) {
+      case "create_channel":
+        return { action: "create_channel", name: String(j.name || ""), private: !!j.private, inviteUserIds: ids(j.inviteUserIds), inviteRole: String(j.inviteRole || "") };
+      case "archive_channel":
+        return { action: "archive_channel", channelId: String(j.channelId || "") };
+      case "invite_users":
+        return { action: "invite_users", userIds: ids(j.userIds), role: String(j.role || "") };
+      case "kick_users":
+        return { action: "kick_users", userIds: ids(j.userIds), role: String(j.role || "") };
+      default:
+        return { action: "none" };
+    }
+  } catch {
+    return { action: "none" };
+  }
+}
+
 export async function runTicket(ticket: Ticket, runId: number, sink: EventSink): Promise<RunOutcome> {
   const prompt = `# Ticket #${ticket.id}: ${ticket.title}
 

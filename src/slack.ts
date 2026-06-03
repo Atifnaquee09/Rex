@@ -1,7 +1,7 @@
 import { App } from "@slack/bolt";
 import { config } from "./config.ts";
 import { createTicket, getPersonBySlackId } from "./db.ts";
-import { triage } from "./rex.ts";
+import { triage, parseAdminIntent } from "./rex.ts";
 import type { Ticket } from "./types.ts";
 
 let app: App | null = null;
@@ -92,54 +92,92 @@ async function isWorkspaceAdmin(uid: string): Promise<boolean> {
   }
 }
 
-// Channel admin actions: add/remove members, create/archive channels. Gated to workspace admins.
-// Returns true if it handled (or refused) an admin request, so the caller stops processing.
+// Resolve a job-title keyword (e.g. "developer") to the Slack user ids whose profile title matches.
+async function usersByTitle(keyword: string, botUserId?: string): Promise<string[]> {
+  if (!app || !keyword) return [];
+  try {
+    const res: any = await app.client.users.list({ limit: 500 });
+    const k = keyword.toLowerCase();
+    return (res.members ?? [])
+      .filter((u: any) => !u.is_bot && !u.deleted && u.id !== botUserId && (u.profile?.title || "").toLowerCase().includes(k))
+      .map((u: any) => u.id);
+  } catch {
+    return [];
+  }
+}
+
+const uniq = (a: string[]) => [...new Set(a)];
+
+// Channel admin actions: add/remove members, create/archive channels. Intent is extracted by the
+// model (typo/phrasing tolerant), then executed deterministically — gated to workspace admins.
 async function handleAdmin(
-  args: { channel: string; threadTs: string; user: string; say: (m: any) => Promise<any> },
+  args: { channel: string; threadTs: string; user: string; botUserId?: string; text: string; say: (m: any) => Promise<any> },
   text: string,
-  targets: string[],
 ): Promise<boolean> {
   if (!app) return false;
-  const isKick = targets.length > 0 && /\b(remove|kick)\b/i.test(text);
-  const isAdd = targets.length > 0 && /\b(add|invite)\b/i.test(text);
-  const isCreate = /\bcreate\b[\s\S]*\b(channel|group)\b/i.test(text);
-  const isArchive = /\b(archive|delete|close)\b[\s\S]*\b(channel|group)\b/i.test(text) || /\b(archive|delete|close)\s+this\b/i.test(text);
-  if (!(isKick || isAdd || isCreate || isArchive)) return false;
+  // Cheap pre-filter so normal chat doesn't trigger an extra model call.
+  if (!/\b(create|archive|delete|remove|kick|add|invite|channel|group)\b/i.test(text)) return false;
+
+  const intent = await parseAdminIntent(args.text);
+  if (intent.action === "none") return false;
 
   if (!(await isWorkspaceAdmin(args.user))) {
     await args.say({ thread_ts: args.threadTs, text: ":lock: Only a workspace admin can ask me to add/remove people or manage channels." });
     return true;
   }
 
-  const reply = (text: string) => args.say({ thread_ts: args.threadTs, text });
+  const reply = (t: string) => args.say({ thread_ts: args.threadTs, text: t });
   try {
-    if (isKick) {
-      const done: string[] = [];
-      for (const id of targets) {
-        await app.client.conversations.kick({ channel: args.channel, user: id });
-        done.push(`<@${id}>`);
-      }
-      await reply(`:white_check_mark: Removed ${done.join(", ")} from this channel.`);
-    } else if (isAdd) {
-      await app.client.conversations.invite({ channel: args.channel, users: targets.join(",") });
-      await reply(`:white_check_mark: Added ${targets.map((i) => `<@${i}>`).join(", ")} to this channel.`);
-    } else if (isCreate) {
-      const m = text.match(/\b(?:channel|group)\b(?:\s+(?:called|named)\s+|\s+)["'#]?([A-Za-z0-9][\w \-]{0,60})/i);
-      const name = (m?.[1] || "").trim().toLowerCase().replace(/[^a-z0-9 _-]/g, "").replace(/\s+/g, "-").slice(0, 80);
+    if (intent.action === "create_channel") {
+      const name = intent.name.trim().toLowerCase().replace(/[^a-z0-9 _-]/g, "").replace(/\s+/g, "-").slice(0, 80);
       if (!name) {
-        await reply("What should I name it? e.g. `create channel design-team`");
+        await reply("What should I name the channel? e.g. `create a channel called design-team`");
         return true;
       }
-      const res: any = await app.client.conversations.create({ name, is_private: /\bprivate\b/i.test(text) });
-      await reply(`:white_check_mark: Created <#${res.channel.id}|${res.channel.name}>.`);
-    } else if (isArchive) {
-      const chMatch = text.match(/<#(C[A-Z0-9]+)/);
-      const target = chMatch ? chMatch[1] : args.channel;
+      const res: any = await app.client.conversations.create({ name, is_private: intent.private });
+      const ch = res.channel.id;
+      const ids = uniq([...intent.inviteUserIds, ...(intent.inviteRole ? await usersByTitle(intent.inviteRole, args.botUserId) : [])]).filter((id) => id !== args.botUserId);
+      let added = 0;
+      if (ids.length) {
+        try {
+          await app.client.conversations.invite({ channel: ch, users: ids.join(",") });
+          added = ids.length;
+        } catch {
+          /* some may already be in / unresolvable */
+        }
+      }
+      await reply(`:white_check_mark: Created <#${ch}|${res.channel.name}>${added ? ` and added ${added} ${intent.inviteRole || "member"}(s).` : "."}`);
+    } else if (intent.action === "invite_users") {
+      const ids = uniq([...intent.userIds, ...(intent.role ? await usersByTitle(intent.role, args.botUserId) : [])]).filter((id) => id !== args.botUserId);
+      if (!ids.length) {
+        await reply("Who should I add? @-mention them or give a role (e.g. \"add all developers\").");
+        return true;
+      }
+      await app.client.conversations.invite({ channel: args.channel, users: ids.join(",") });
+      await reply(`:white_check_mark: Added ${ids.map((i) => `<@${i}>`).join(", ")} to this channel.`);
+    } else if (intent.action === "kick_users") {
+      const ids = uniq([...intent.userIds, ...(intent.role ? await usersByTitle(intent.role, args.botUserId) : [])]).filter((id) => id !== args.botUserId);
+      if (!ids.length) {
+        await reply("Who should I remove? @-mention them.");
+        return true;
+      }
+      const done: string[] = [];
+      for (const id of ids) {
+        try {
+          await app.client.conversations.kick({ channel: args.channel, user: id });
+          done.push(`<@${id}>`);
+        } catch (e: any) {
+          await reply(`:warning: Couldn't remove <@${id}>: \`${e?.data?.error || e}\``);
+        }
+      }
+      if (done.length) await reply(`:white_check_mark: Removed ${done.join(", ")} from this channel.`);
+    } else if (intent.action === "archive_channel") {
+      const target = intent.channelId || args.channel;
       if (target === args.channel) await reply(":file_folder: Archiving this channel…");
       await app.client.conversations.archive({ channel: target });
       if (target !== args.channel) await reply(":white_check_mark: Archived that channel.");
     }
-    console.log(`[admin] ${args.user} in ${args.channel}: ${text.slice(0, 100)}`);
+    console.log(`[admin] ${args.user} ${intent.action} in ${args.channel}`);
   } catch (e: any) {
     await reply(`:warning: Couldn't do that: \`${e?.data?.error || e?.message || e}\``);
   }
@@ -237,7 +275,7 @@ async function handleInbound(args: {
 
   // Admin actions (add/remove members, create/archive channels) — gated to workspace admins.
   // Checked before relay so "remove @X" isn't treated as a message relay.
-  if (await handleAdmin(args, text, relayTargets)) return;
+  if (await handleAdmin(args, text)) return;
 
   // Relay (deterministic): if the user @-mentions a real person (not Rex or themselves), treat
   // it as "deliver this message to them". Strip leading filler words to get the actual message.
