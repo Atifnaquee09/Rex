@@ -49,7 +49,11 @@ async function threadContext(channel: string, threadTs: string, botUserId?: stri
     const lines: string[] = [];
     for (const m of res.messages ?? []) {
       const uid = m.user || (m.bot_id ? botUserId : undefined);
-      const text = stripMention(m.text || "").trim();
+      // Neutralise delimiter/markup injection at the source before it reaches the model.
+      const text = stripMention(m.text || "")
+        .trim()
+        .replace(/-{2,}/g, "—")
+        .replace(/<\/?conversation>/gi, "");
       if (!text) continue;
       lines.push(`${uid ? await userLabel(uid, botUserId) : "someone"}: ${text}`);
     }
