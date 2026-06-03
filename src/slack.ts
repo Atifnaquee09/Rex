@@ -85,6 +85,22 @@ async function handleInbound(args: {
     return;
   }
 
+  // Relay (deterministic): "tell/remind/notify @someone ..." with a tagged person who isn't
+  // Rex or the sender. Done in code because we strip mentions before the model sees the text.
+  const relayTargets = [...args.text.matchAll(/<@([A-Z0-9]+)>/g)]
+    .map((m) => m[1])
+    .filter((id) => id !== args.botUserId && id !== args.user);
+  if (relayTargets.length && /\b(tell|remind|notify|message|ping|ask|let|pass)\b/i.test(text)) {
+    let msg = text
+      .replace(/^\s*(please\s+)?(tell|remind|notify|message|ping|ask|let|pass(\s+on)?(\s+to)?)\b/i, "")
+      .replace(/^\s*(them|him|her|the team|everyone)?\s*(that|to)\b/i, "")
+      .trim();
+    if (!msg) msg = text;
+    const mentions = relayTargets.map((id) => `<@${id}>`).join(" ");
+    await args.say({ thread_ts: args.threadTs, text: `${mentions} — :speech_balloon: from <@${args.user}>: ${msg}` });
+    return;
+  }
+
   // Otherwise let Rex decide: real work -> ticket, relay -> notify a person, conversation -> reply.
   // If we know who this is (team profile), pass their role so Rex adapts deterministically.
   const person = getPersonBySlackId(args.user);
