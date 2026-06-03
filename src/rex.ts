@@ -159,20 +159,28 @@ export type AdminIntent =
   | { action: "kick_users"; userIds: string[]; role: string };
 
 const ADMIN_SYSTEM = `You convert a Slack workspace-management request into ONE JSON object. Output JSON only, no prose.
-
 The message may contain Slack mentions: <@U123> is a user id, <#C123|name> is a channel id.
 
-Shapes (pick one):
-{"action":"create_channel","name":"channel-name","private":false,"inviteUserIds":["U.."],"inviteRole":"developer"}
-{"action":"archive_channel","channelId":"C.. or empty for the current channel"}
-{"action":"invite_users","userIds":["U.."],"role":"developer or empty"}
-{"action":"kick_users","userIds":["U.."],"role":"developer or empty"}
-{"action":"none"}
+Actions: create_channel, archive_channel, invite_users, kick_users, none.
 
 Rules:
-- Extract user ids from <@...>. Put job-title words ("developers","designers","engineers") into the role/inviteRole field, singular and lowercase ("developer").
-- "none" if it is NOT about managing channels/members — e.g. "add a divide function to the code" is none (that's coding work, not a member).
-- Tolerate typos ("chanel"→channel, "devloper"→developer).`;
+- "add <people OR a role> to a channel/group/here" = invite_users (adding PEOPLE to a channel).
+- "create a channel/group ..." = create_channel (with any people-to-add in inviteUserIds/inviteRole).
+- "remove/kick <people>" = kick_users.  "archive/delete/close this channel" = archive_channel.
+- Extract user ids from <@...>. Put job-title words ("developers","designers","engineers","QA") into
+  the role / inviteRole field, singular lowercase ("developer"). Tolerate typos (chanel→channel, devloper→developer).
+- Use "none" ONLY when it is not about channels/members at all — e.g. "add a divide function to calc.js"
+  is none (that's writing code, not adding a person).
+
+Examples:
+"create a channel called design and add all designers" => {"action":"create_channel","name":"design","private":false,"inviteUserIds":[],"inviteRole":"designer"}
+"i want you to add all devlopers in this group" => {"action":"invite_users","userIds":[],"role":"developer"}
+"add <@U5> here" => {"action":"invite_users","userIds":["U5"],"role":""}
+"remove <@U2> from this channel" => {"action":"kick_users","userIds":["U2"],"role":""}
+"archive this channel" => {"action":"archive_channel","channelId":""}
+"create chanel called Devloper and add all devlopers in that" => {"action":"create_channel","name":"developer","private":false,"inviteUserIds":[],"inviteRole":"developer"}
+"add a divide function to calc.js" => {"action":"none"}
+"who is the designer" => {"action":"none"}`;
 
 /** Extract a structured channel/member admin action from a natural-language request. */
 export async function parseAdminIntent(rawMessage: string): Promise<AdminIntent> {
@@ -180,7 +188,7 @@ export async function parseAdminIntent(rawMessage: string): Promise<AdminIntent>
   try {
     for await (const m of query({
       prompt: rawMessage,
-      options: { model: "haiku", systemPrompt: ADMIN_SYSTEM, allowedTools: [], maxTurns: 1 },
+      options: { model: "sonnet", systemPrompt: ADMIN_SYSTEM, allowedTools: [], maxTurns: 1 },
     })) {
       if (m.type === "result") out = ((m as any).result ?? "").trim();
     }
