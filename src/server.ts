@@ -74,7 +74,7 @@ export function startServer(): void {
     res.json(stats());
   });
 
-  app.listen(config.port, () => {
-    console.log(`[server] dashboard on http://localhost:${config.port}`);
+  app.listen(config.port, config.host, () => {
+    console.log(`[server] dashboard on http://${config.host}:${config.port}`);
   });
 }
