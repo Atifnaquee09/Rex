@@ -40,6 +40,33 @@ async function userLabel(uid: string, botUserId?: string): Promise<string> {
   }
 }
 
+// Build a live roster of this channel's members from their Slack profiles (name + job title),
+// so Rex can answer "who's the designer" without manual setup. Needs channels:read/groups:read
+// + users:read; degrades to "" if unavailable. Titles are user-set, so they're length-capped
+// and newline-stripped before reaching the model.
+async function channelRoster(channel: string, botUserId?: string): Promise<string> {
+  if (!app) return "";
+  try {
+    const res: any = await app.client.conversations.members({ channel, limit: 50 });
+    const lines: string[] = [];
+    for (const id of (res.members ?? []).filter((m: string) => m !== botUserId)) {
+      try {
+        const info: any = await app.client.users.info({ user: id });
+        if (info.user?.is_bot || info.user?.deleted) continue;
+        const name = info.user?.profile?.real_name || info.user?.real_name || info.user?.name || "teammate";
+        const title = (info.user?.profile?.title || "").replace(/[\n\r]+/g, " ").slice(0, 80);
+        const p = getPersonBySlackId(id);
+        lines.push(`- ${name}${title ? ` — ${title}` : ""}${p ? ` [talk to as ${p.role}]` : ""}`);
+      } catch {
+        /* skip member we can't resolve */
+      }
+    }
+    return lines.join("\n");
+  } catch {
+    return "";
+  }
+}
+
 // Pull the thread transcript so Rex can reply with full conversation context.
 // Needs channels:history / groups:history scope; degrades to "" if unavailable.
 async function threadContext(channel: string, threadTs: string, botUserId?: string): Promise<string> {
@@ -153,7 +180,8 @@ async function handleInbound(args: {
   const person = getPersonBySlackId(args.user);
   const profile = person ? { name: person.name, role: person.role, notes: person.notes } : undefined;
   const context = await threadContext(args.channel, args.threadTs, args.botUserId);
-  const decision = await triage(text, profile, context);
+  const members = await channelRoster(args.channel, args.botUserId);
+  const decision = await triage(text, profile, context, members);
 
   if (decision.kind === "relay") {
     // Targets = everyone @-mentioned in the raw message except Rex and the sender.
