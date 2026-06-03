@@ -42,6 +42,42 @@ const SUBAGENTS: Record<string, AgentDefinition> = {
   },
 };
 
+export type Triage =
+  | { kind: "task"; title: string; description: string }
+  | { kind: "chat"; reply: string };
+
+const TRIAGE_SYSTEM = `You are Rex, a senior software engineer, chatting on Slack.
+Decide whether the user's message is a request to do actual software work (something you'd
+file as a ticket and execute in a codebase) or just conversation.
+
+Reply in EXACTLY one of these formats, nothing else:
+TASK :: <short imperative title> :: <one-line description of the work>
+CHAT :: <a brief, friendly reply in Rex's voice — direct, senior-engineer tone>
+
+Greetings, small talk, status questions, and "what can you do" are CHAT.
+"add/fix/build/refactor/implement <something in code>" is TASK.`;
+
+/** Classify a Slack message as work-to-do or conversation (cheap Haiku call). */
+export async function triage(message: string): Promise<Triage> {
+  let out = "";
+  try {
+    for await (const m of query({
+      prompt: message,
+      options: { model: "haiku", systemPrompt: TRIAGE_SYSTEM, allowedTools: [], maxTurns: 1 },
+    })) {
+      if (m.type === "result") out = ((m as any).result ?? "").trim();
+    }
+  } catch {
+    return { kind: "chat", reply: "I hit a snag reading that. Try again, or file work with `title :: description`." };
+  }
+  if (/^TASK\s*::/i.test(out)) {
+    const parts = out.split("::").map((s) => s.trim());
+    return { kind: "task", title: parts[1] || message.slice(0, 80), description: parts[2] || "" };
+  }
+  const reply = out.replace(/^CHAT\s*::\s*/i, "").trim();
+  return { kind: "chat", reply: reply || "Hey — I'm Rex. Tell me what to build or fix and I'll take it from there." };
+}
+
 export async function runTicket(ticket: Ticket, runId: number, sink: EventSink): Promise<RunOutcome> {
   const prompt = `# Ticket #${ticket.id}: ${ticket.title}
 

@@ -1,6 +1,7 @@
 import { App } from "@slack/bolt";
 import { config } from "./config.ts";
 import { createTicket } from "./db.ts";
+import { triage } from "./rex.ts";
 import type { Ticket } from "./types.ts";
 
 let app: App | null = null;
@@ -40,21 +41,17 @@ function toTicket(raw: string): { title: string; description: string } {
   return { title: lines[0].trim(), description: lines.slice(1).join("\n").trim() };
 }
 
-async function handleWorkRequest(args: {
-  text: string;
+async function fileTicket(args: {
+  title: string;
+  description: string;
   channel: string;
   threadTs: string;
   user: string;
   say: (msg: any) => Promise<any>;
 }): Promise<void> {
-  const { title, description } = toTicket(args.text);
-  if (!title) {
-    await args.say({ thread_ts: args.threadTs, text: "Give me a ticket title, e.g. `@Rex Fix login redirect :: users land on 404 after SSO`." });
-    return;
-  }
   const ticket = createTicket({
-    title,
-    description,
+    title: args.title,
+    description: args.description,
     source: "slack",
     created_by: args.user,
     slack_channel: args.channel,
@@ -65,6 +62,35 @@ async function handleWorkRequest(args: {
     thread_ts: args.threadTs,
     text: `:ticket: Filed *#${ticket.id} — ${ticket.title}* and queued it. I'll post progress in this thread.`,
   });
+}
+
+async function handleInbound(args: {
+  text: string;
+  channel: string;
+  threadTs: string;
+  user: string;
+  say: (msg: any) => Promise<any>;
+}): Promise<void> {
+  const text = stripMention(args.text);
+  if (!text) {
+    await args.say({ thread_ts: args.threadTs, text: "Hey — I'm Rex. Tell me what to build or fix, or use `title :: description` to file work directly." });
+    return;
+  }
+
+  // Explicit ticket syntax (contains "::") goes straight to a ticket — no triage needed.
+  if (text.includes("::")) {
+    const { title, description } = toTicket(args.text);
+    await fileTicket({ ...args, title, description });
+    return;
+  }
+
+  // Otherwise let Rex decide: real work -> ticket, conversation -> reply.
+  const decision = await triage(text);
+  if (decision.kind === "chat") {
+    await args.say({ thread_ts: args.threadTs, text: decision.reply });
+    return;
+  }
+  await fileTicket({ ...args, title: decision.title, description: decision.description });
 }
 
 export async function startSlack(): Promise<void> {
@@ -83,7 +109,7 @@ export async function startSlack(): Promise<void> {
   // @Rex in a channel
   app.event("app_mention", async ({ event, say }: any) => {
     const e = event as any;
-    await handleWorkRequest({
+    await handleInbound({
       text: e.text ?? "",
       channel: e.channel,
       threadTs: e.thread_ts ?? e.ts,
@@ -97,7 +123,7 @@ export async function startSlack(): Promise<void> {
     const m = message as any;
     if (m.subtype || m.bot_id) return; // ignore bot/system messages
     if (m.channel_type !== "im") return; // only DMs here; channel use goes through app_mention
-    await handleWorkRequest({
+    await handleInbound({
       text: m.text ?? "",
       channel: m.channel,
       threadTs: m.thread_ts ?? m.ts,
