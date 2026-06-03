@@ -78,6 +78,74 @@ async function channelRoster(channel: string, botUserId?: string): Promise<strin
   }
 }
 
+// Only Slack workspace admins/owners may command destructive admin actions.
+const adminCache = new Map<string, boolean>();
+async function isWorkspaceAdmin(uid: string): Promise<boolean> {
+  if (adminCache.has(uid)) return adminCache.get(uid)!;
+  try {
+    const r: any = await app!.client.users.info({ user: uid });
+    const ok = !!(r.user?.is_admin || r.user?.is_owner || r.user?.is_primary_owner);
+    adminCache.set(uid, ok);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+// Channel admin actions: add/remove members, create/archive channels. Gated to workspace admins.
+// Returns true if it handled (or refused) an admin request, so the caller stops processing.
+async function handleAdmin(
+  args: { channel: string; threadTs: string; user: string; say: (m: any) => Promise<any> },
+  text: string,
+  targets: string[],
+): Promise<boolean> {
+  if (!app) return false;
+  const isKick = targets.length > 0 && /\b(remove|kick)\b/i.test(text);
+  const isAdd = targets.length > 0 && /\b(add|invite)\b/i.test(text);
+  const isCreate = /\bcreate\b[\s\S]*\b(channel|group)\b/i.test(text);
+  const isArchive = /\b(archive|delete|close)\b[\s\S]*\b(channel|group)\b/i.test(text) || /\b(archive|delete|close)\s+this\b/i.test(text);
+  if (!(isKick || isAdd || isCreate || isArchive)) return false;
+
+  if (!(await isWorkspaceAdmin(args.user))) {
+    await args.say({ thread_ts: args.threadTs, text: ":lock: Only a workspace admin can ask me to add/remove people or manage channels." });
+    return true;
+  }
+
+  const reply = (text: string) => args.say({ thread_ts: args.threadTs, text });
+  try {
+    if (isKick) {
+      const done: string[] = [];
+      for (const id of targets) {
+        await app.client.conversations.kick({ channel: args.channel, user: id });
+        done.push(`<@${id}>`);
+      }
+      await reply(`:white_check_mark: Removed ${done.join(", ")} from this channel.`);
+    } else if (isAdd) {
+      await app.client.conversations.invite({ channel: args.channel, users: targets.join(",") });
+      await reply(`:white_check_mark: Added ${targets.map((i) => `<@${i}>`).join(", ")} to this channel.`);
+    } else if (isCreate) {
+      const m = text.match(/\b(?:channel|group)\b(?:\s+(?:called|named)\s+|\s+)["'#]?([A-Za-z0-9][\w \-]{0,60})/i);
+      const name = (m?.[1] || "").trim().toLowerCase().replace(/[^a-z0-9 _-]/g, "").replace(/\s+/g, "-").slice(0, 80);
+      if (!name) {
+        await reply("What should I name it? e.g. `create channel design-team`");
+        return true;
+      }
+      const res: any = await app.client.conversations.create({ name, is_private: /\bprivate\b/i.test(text) });
+      await reply(`:white_check_mark: Created <#${res.channel.id}|${res.channel.name}>.`);
+    } else if (isArchive) {
+      const chMatch = text.match(/<#(C[A-Z0-9]+)/);
+      const target = chMatch ? chMatch[1] : args.channel;
+      if (target === args.channel) await reply(":file_folder: Archiving this channel…");
+      await app.client.conversations.archive({ channel: target });
+      if (target !== args.channel) await reply(":white_check_mark: Archived that channel.");
+    }
+    console.log(`[admin] ${args.user} in ${args.channel}: ${text.slice(0, 100)}`);
+  } catch (e: any) {
+    await reply(`:warning: Couldn't do that: \`${e?.data?.error || e?.message || e}\``);
+  }
+  return true;
+}
+
 // Pull the thread transcript so Rex can reply with full conversation context.
 // Needs channels:history / groups:history scope; degrades to "" if unavailable.
 async function threadContext(channel: string, threadTs: string, botUserId?: string): Promise<string> {
@@ -163,12 +231,16 @@ async function handleInbound(args: {
     return;
   }
 
-  // Relay (deterministic): if the user @-mentions a real person (not Rex or themselves), treat
-  // it as "deliver this message to them". Done in code because mentions are stripped before the
-  // model sees the text. Strip leading filler words to get the actual message.
   const relayTargets = [...args.text.matchAll(/<@([A-Z0-9]+)>/g)]
     .map((m) => m[1])
     .filter((id) => id !== args.botUserId && id !== args.user);
+
+  // Admin actions (add/remove members, create/archive channels) — gated to workspace admins.
+  // Checked before relay so "remove @X" isn't treated as a message relay.
+  if (await handleAdmin(args, text, relayTargets)) return;
+
+  // Relay (deterministic): if the user @-mentions a real person (not Rex or themselves), treat
+  // it as "deliver this message to them". Strip leading filler words to get the actual message.
   if (relayTargets.length) {
     let msg = text.trim();
     let prev: string;
