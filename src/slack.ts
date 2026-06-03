@@ -85,18 +85,25 @@ async function handleInbound(args: {
     return;
   }
 
-  // Relay (deterministic): "tell/remind/notify @someone ..." with a tagged person who isn't
-  // Rex or the sender. Done in code because we strip mentions before the model sees the text.
+  // Relay (deterministic): if the user @-mentions a real person (not Rex or themselves), treat
+  // it as "deliver this message to them". Done in code because mentions are stripped before the
+  // model sees the text. Strip leading filler words to get the actual message.
   const relayTargets = [...args.text.matchAll(/<@([A-Z0-9]+)>/g)]
     .map((m) => m[1])
     .filter((id) => id !== args.botUserId && id !== args.user);
-  if (relayTargets.length && /\b(tell|remind|notify|message|ping|ask|let|pass)\b/i.test(text)) {
-    let msg = text
-      .replace(/^\s*(please\s+)?(tell|remind|notify|message|ping|ask|let|pass(\s+on)?(\s+to)?)\b/i, "")
-      .replace(/^\s*(them|him|her|the team|everyone)?\s*(that|to)\b/i, "")
-      .trim();
-    if (!msg) msg = text;
+  if (relayTargets.length) {
+    let msg = text.trim();
+    let prev: string;
+    do {
+      prev = msg;
+      msg = msg.replace(/^\s*(please|tell|remind|notify|message|ping|ask|let|pass|on|to|that|them|him|her|everyone|the\s+team)\b[:,]?\s*/i, "");
+    } while (msg !== prev);
+    msg = msg.trim();
     const mentions = relayTargets.map((id) => `<@${id}>`).join(" ");
+    if (!msg) {
+      await args.say({ thread_ts: args.threadTs, text: `What should I tell ${mentions}?` });
+      return;
+    }
     await args.say({ thread_ts: args.threadTs, text: `${mentions} — :speech_balloon: from <@${args.user}>: ${msg}` });
     return;
   }
