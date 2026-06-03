@@ -6,6 +6,17 @@ import type { Ticket } from "./types.ts";
 
 let app: App | null = null;
 
+// De-dupe Slack event redeliveries (Socket Mode can retry if an ack is slow). Without this,
+// one message could be answered twice — or worse, file/execute a ticket twice.
+const handledEvents = new Map<string, number>();
+function alreadyHandled(key: string): boolean {
+  const now = Date.now();
+  for (const [k, t] of handledEvents) if (now - t > 120_000) handledEvents.delete(k);
+  if (handledEvents.has(key)) return true;
+  handledEvents.set(key, now);
+  return false;
+}
+
 /**
  * Post an update to the Slack thread a ticket originated from (no-op if the
  * ticket wasn't created from Slack or Slack is disabled).
@@ -220,6 +231,7 @@ export async function startSlack(): Promise<void> {
   // @Rex in a channel
   app.event("app_mention", async ({ event, context, say }: any) => {
     const e = event as any;
+    if (alreadyHandled(`${e.channel}:${e.ts}`)) return;
     await handleInbound({
       text: e.text ?? "",
       channel: e.channel,
@@ -235,6 +247,7 @@ export async function startSlack(): Promise<void> {
     const m = message as any;
     if (m.subtype || m.bot_id) return; // ignore bot/system messages
     if (m.channel_type !== "im") return; // only DMs here; channel use goes through app_mention
+    if (alreadyHandled(`${m.channel}:${m.ts}`)) return;
     await handleInbound({
       text: m.text ?? "",
       channel: m.channel,
