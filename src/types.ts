@@ -38,6 +38,7 @@ export interface Person {
   id: number;
   slack_user_id: string | null;
   name: string;
+  title: string;
   role: PersonRole;
   notes: string;
   created_at: string;

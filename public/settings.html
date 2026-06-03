@@ -66,7 +66,9 @@
       <h3 id="modal-title" class="text-sm font-semibold text-white mb-3">Add person</h3>
       <label class="block text-[11px] text-zinc-500 mb-1">Name</label>
       <input id="p-name" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm mb-3 outline-none focus:border-indigo-500" />
-      <label class="block text-[11px] text-zinc-500 mb-1">Role</label>
+      <label class="block text-[11px] text-zinc-500 mb-1">Job title <span class="text-zinc-600">(e.g. Designer, Backend Engineer, PM)</span></label>
+      <input id="p-title" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm mb-3 outline-none focus:border-indigo-500" />
+      <label class="block text-[11px] text-zinc-500 mb-1">How Rex should talk to them</label>
       <select id="p-role" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm mb-3 outline-none focus:border-indigo-500">
         <option value="technical">technical — give engineering depth</option>
         <option value="business">business — plain language, outcomes</option>
@@ -114,6 +116,7 @@
       el.innerHTML = people.map((p) => `
         <div class="flex items-center gap-3 rounded-lg border border-zinc-800 px-3 py-2">
           <span class="text-sm text-white">${escapeHtml(p.name)}</span>
+          ${p.title ? `<span class="text-[11px] text-zinc-400">${escapeHtml(p.title)}</span>` : ""}
           <span class="text-[10px] px-2 py-0.5 rounded-full ${ROLE_BADGE[p.role] || ""}">${p.role}</span>
           <span class="text-[11px] text-zinc-600 mono">${p.slack_user_id ? escapeHtml(p.slack_user_id) : "no slack id"}</span>
           <span class="text-[11px] text-zinc-500 truncate flex-1">${escapeHtml(p.notes || "")}</span>
@@ -132,6 +135,7 @@
       editingId = person ? person.id : null;
       document.getElementById("modal-title").textContent = person ? "Edit person" : "Add person";
       document.getElementById("p-name").value = person ? person.name : "";
+      document.getElementById("p-title").value = person ? (person.title || "") : "";
       document.getElementById("p-role").value = person ? person.role : "technical";
       document.getElementById("p-slack").value = person ? (person.slack_user_id || "") : "";
       document.getElementById("p-notes").value = person ? (person.notes || "") : "";
@@ -147,6 +151,7 @@
     document.getElementById("modal-save").addEventListener("click", async () => {
       const body = {
         name: document.getElementById("p-name").value.trim(),
+        title: document.getElementById("p-title").value.trim(),
         role: document.getElementById("p-role").value,
         slack_user_id: document.getElementById("p-slack").value.trim(),
         notes: document.getElementById("p-notes").value.trim(),

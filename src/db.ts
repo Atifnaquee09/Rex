@@ -91,12 +91,20 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     slack_user_id TEXT UNIQUE,
     name TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
     role TEXT NOT NULL DEFAULT 'technical',
     notes TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 `);
+
+// Migration for databases created before `title` existed.
+try {
+  db.exec("ALTER TABLE people ADD COLUMN title TEXT NOT NULL DEFAULT ''");
+} catch {
+  /* column already exists */
+}
 
 // --- Settings (key/value, with seeded defaults) ---
 
@@ -158,10 +166,10 @@ export function allSettings(): Record<string, string> {
 
 // --- People (team profiles) ---
 
-export function createPerson(input: { name: string; role: PersonRole; slack_user_id?: string | null; notes?: string }): Person {
+export function createPerson(input: { name: string; title?: string; role: PersonRole; slack_user_id?: string | null; notes?: string }): Person {
   const info = db
-    .prepare("INSERT INTO people (name, role, slack_user_id, notes) VALUES (?, ?, ?, ?)")
-    .run(input.name, input.role, input.slack_user_id || null, input.notes ?? "");
+    .prepare("INSERT INTO people (name, title, role, slack_user_id, notes) VALUES (?, ?, ?, ?, ?)")
+    .run(input.name, input.title ?? "", input.role, input.slack_user_id || null, input.notes ?? "");
   return getPerson(Number(info.lastInsertRowid))!;
 }
 
@@ -177,10 +185,10 @@ export function listPeople(): Person[] {
   return db.prepare("SELECT * FROM people ORDER BY name ASC").all() as unknown as Person[];
 }
 
-export function updatePerson(id: number, input: { name: string; role: PersonRole; slack_user_id?: string | null; notes?: string }): Person | undefined {
+export function updatePerson(id: number, input: { name: string; title?: string; role: PersonRole; slack_user_id?: string | null; notes?: string }): Person | undefined {
   db.prepare(
-    "UPDATE people SET name = ?, role = ?, slack_user_id = ?, notes = ?, updated_at = datetime('now') WHERE id = ?",
-  ).run(input.name, input.role, input.slack_user_id || null, input.notes ?? "", id);
+    "UPDATE people SET name = ?, title = ?, role = ?, slack_user_id = ?, notes = ?, updated_at = datetime('now') WHERE id = ?",
+  ).run(input.name, input.title ?? "", input.role, input.slack_user_id || null, input.notes ?? "", id);
   return getPerson(id);
 }
 

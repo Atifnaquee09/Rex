@@ -165,6 +165,7 @@ export function startServer(): void {
 
   const parsePerson = (b: any) => ({
     name: String(b?.name ?? "").trim(),
+    title: typeof b?.title === "string" ? b.title.trim() : "",
     role: (ROLES.includes(b?.role) ? b.role : "technical") as PersonRole,
     slack_user_id: b?.slack_user_id ? String(b.slack_user_id).trim() : null,
     notes: typeof b?.notes === "string" ? b.notes : "",
