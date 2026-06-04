@@ -180,7 +180,7 @@ export function startServer(): void {
 
   app.put("/api/settings", (req, res) => {
     const body = req.body ?? {};
-    for (const key of ["persona", "standards"]) {
+    for (const key of ["persona", "standards", "slack_updates_channel"]) {
       if (typeof body[key] === "string") setSetting(key, body[key]);
     }
     res.json(allSettings());

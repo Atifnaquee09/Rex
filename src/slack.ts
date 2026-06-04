@@ -1,6 +1,6 @@
 import { App } from "@slack/bolt";
 import { config } from "./config.ts";
-import { createTicket, getPersonBySlackId } from "./db.ts";
+import { createTicket, getPersonBySlackId, getSetting } from "./db.ts";
 import { triage, parseAdminIntent } from "./rex.ts";
 import type { Ticket } from "./types.ts";
 
@@ -22,13 +22,14 @@ function alreadyHandled(key: string): boolean {
  * ticket wasn't created from Slack or Slack is disabled).
  */
 export async function notifySlack(ticket: Ticket, text: string): Promise<void> {
-  if (!app || !ticket.slack_channel) return;
+  if (!app) return;
+  // Slack-originated tickets reply in their thread; everything else (dashboard tickets)
+  // goes to the configured updates channel so you still get notified.
+  const channel = ticket.slack_channel || getSetting("slack_updates_channel", "").trim();
+  if (!channel) return;
+  const thread_ts = ticket.slack_channel ? (ticket.slack_thread_ts ?? undefined) : undefined;
   try {
-    await app.client.chat.postMessage({
-      channel: ticket.slack_channel,
-      thread_ts: ticket.slack_thread_ts ?? undefined,
-      text,
-    });
+    await app.client.chat.postMessage({ channel, thread_ts, text });
   } catch (err) {
     console.error("[slack] notify failed:", err instanceof Error ? err.message : err);
   }

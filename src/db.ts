@@ -174,6 +174,7 @@ function seedSetting(key: string, value: string): void {
 }
 seedSetting("persona", DEFAULT_PERSONA);
 seedSetting("standards", DEFAULT_STANDARDS);
+seedSetting("slack_updates_channel", "");
 
 export function getSetting(key: string, fallback = ""): string {
   const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined;

@@ -43,6 +43,12 @@
         <p class="text-xs text-zinc-500 mb-3">Injected when Rex executes tickets — coding standards, conventions, what to avoid, definition of done.</p>
         <textarea id="standards" rows="9" class="w-full bg-black border border-zinc-800 rounded-lg px-3 py-2 text-xs mono outline-none focus:border-indigo-500"></textarea>
       </div>
+      <!-- Slack updates channel -->
+      <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-4 lg:col-span-2">
+        <h2 class="text-sm font-semibold text-white mb-1">Slack updates channel</h2>
+        <p class="text-xs text-zinc-500 mb-3">Channel ID where Rex posts ticket updates (start + result, with the ticket number) for tickets created on the dashboard. Slack-created tickets always reply in their own thread. In Slack: open the channel → details → copy the <span class="mono">Channel ID</span> (starts <span class="mono">C</span>).</p>
+        <input id="slack_updates_channel" placeholder="C0123ABC456" class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm mono outline-none focus:border-indigo-500" />
+      </div>
     </div>
     <div class="mt-3">
       <button id="save-settings" class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg px-5 py-2 transition">Save persona & standards</button>
@@ -96,13 +102,14 @@
       const s = await fetch("/api/settings").then((r) => r.json());
       document.getElementById("persona").value = s.persona || "";
       document.getElementById("standards").value = s.standards || "";
+      document.getElementById("slack_updates_channel").value = s.slack_updates_channel || "";
     }
 
     document.getElementById("save-settings").addEventListener("click", async () => {
       await fetch("/api/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ persona: document.getElementById("persona").value, standards: document.getElementById("standards").value }),
+        body: JSON.stringify({ persona: document.getElementById("persona").value, standards: document.getElementById("standards").value, slack_updates_channel: document.getElementById("slack_updates_channel").value.trim() }),
       });
       const st = document.getElementById("save-status");
       st.textContent = "Saved ✓";
