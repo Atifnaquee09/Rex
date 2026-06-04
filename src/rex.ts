@@ -88,6 +88,24 @@ function sanitizeContext(ctx: string): string {
     .slice(0, 4000);
 }
 
+/** Run a one-shot model query, retrying transient failures, and return the result text. */
+async function modelText(prompt: string, options: Record<string, unknown>, retries = 2): Promise<string> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      let out = "";
+      for await (const m of query({ prompt, options: options as any })) {
+        if (m.type === "result") out = ((m as any).result ?? "").trim();
+      }
+      return out;
+    } catch (e) {
+      lastErr = e;
+      await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+    }
+  }
+  throw lastErr;
+}
+
 /** Sanitise a single user-entered field (name/title/notes) before placing it in the system prompt. */
 function sanitizeField(s: string): string {
   return (s || "")
@@ -131,14 +149,9 @@ ${message}`
     : message;
   let out = "";
   try {
-    for await (const m of query({
-      prompt,
-      options: { model: "sonnet", systemPrompt: system, allowedTools: [], maxTurns: 1 },
-    })) {
-      if (m.type === "result") out = ((m as any).result ?? "").trim();
-    }
+    out = await modelText(prompt, { model: "sonnet", systemPrompt: system, allowedTools: [], maxTurns: 1 });
   } catch {
-    return { kind: "chat", reply: "I hit a snag reading that. Try again, or file work with `title :: description`." };
+    return { kind: "chat", reply: "Sorry, I had a brief hiccup just now — say that again and I'll pick it right up." };
   }
   if (/^TASK\s*::/i.test(out)) {
     const parts = out.split("::").map((s) => s.trim());
@@ -186,12 +199,7 @@ Examples:
 export async function parseAdminIntent(rawMessage: string): Promise<AdminIntent> {
   let out = "";
   try {
-    for await (const m of query({
-      prompt: rawMessage,
-      options: { model: "sonnet", systemPrompt: ADMIN_SYSTEM, allowedTools: [], maxTurns: 1 },
-    })) {
-      if (m.type === "result") out = ((m as any).result ?? "").trim();
-    }
+    out = await modelText(rawMessage, { model: "sonnet", systemPrompt: ADMIN_SYSTEM, allowedTools: [], maxTurns: 1 });
   } catch {
     return { action: "none" };
   }
