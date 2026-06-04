@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Rex — Command Deck</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
   <style>
     body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
     .scroll::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -13,6 +15,20 @@
     .col-drop.drag-over { outline: 2px dashed #6366f1; outline-offset: -2px; background: #6366f10d; }
     .card { cursor: grab; }
     .card:active { cursor: grabbing; }
+    /* Rendered markdown in the activity log */
+    .md-body { color: #d4d4d8; line-height: 1.5; margin-top: 4px; }
+    .md-body h1, .md-body h2, .md-body h3 { color: #fff; font-weight: 600; margin: 8px 0 4px; }
+    .md-body h1 { font-size: 1rem; } .md-body h2 { font-size: 0.95rem; } .md-body h3 { font-size: 0.9rem; }
+    .md-body p { margin: 4px 0; }
+    .md-body ul, .md-body ol { margin: 4px 0; padding-left: 18px; }
+    .md-body ul { list-style: disc; } .md-body ol { list-style: decimal; }
+    .md-body li { margin: 2px 0; }
+    .md-body strong { color: #fff; font-weight: 600; }
+    .md-body a { color: #818cf8; text-decoration: underline; }
+    .md-body code { background: #18181b; border: 1px solid #27272a; border-radius: 4px; padding: 1px 4px; font-family: ui-monospace, Menlo, monospace; font-size: 0.85em; }
+    .md-body pre { background: #000; border: 1px solid #27272a; border-radius: 8px; padding: 10px; overflow-x: auto; margin: 6px 0; }
+    .md-body pre code { background: none; border: none; padding: 0; }
+    .md-body blockquote { border-left: 3px solid #3f3f46; padding-left: 10px; color: #a1a1aa; margin: 4px 0; }
   </style>
 </head>
 <body class="bg-zinc-950 text-zinc-200 min-h-screen">
@@ -103,8 +119,9 @@
     const EVENT_COLORS = { assistant: "text-zinc-300", tool: "text-sky-400", system: "text-zinc-500", result: "text-emerald-400", error: "text-rose-400", thinking: "text-fuchsia-400" };
 
     let tickets = [];
-    let selectedId = null, lastEventId = 0, dragId = null;
+    let selectedId = null, lastEventId = 0, dragId = null, lastRendered = "";
     const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const renderRich = (s) => DOMPurify.sanitize(marked.parse(String(s || "")));
 
     async function loadStats() {
       const s = await fetch("/api/stats").then((r) => r.json());
@@ -173,7 +190,7 @@
     }
 
     async function openDetail(id) {
-      if (id !== selectedId) { selectedId = id; lastEventId = 0; document.getElementById("d-log").innerHTML = ""; }
+      if (id !== selectedId) { selectedId = id; lastEventId = 0; lastRendered = ""; document.getElementById("d-log").innerHTML = ""; }
       document.getElementById("detail-modal").classList.remove("hidden");
       await refreshDetail();
     }
@@ -197,14 +214,24 @@
         ? `run #${run.id} · ${run.model} · in ${run.input_tokens} / out ${run.output_tokens} · $${Number(run.cost_usd).toFixed(4)} · ${run.num_turns} turns`
         : "no run yet";
       const log = document.getElementById("d-log");
+      let appended = 0;
       for (const ev of data.events) {
         lastEventId = Math.max(lastEventId, ev.id);
+        const rich = ev.type === "assistant" || ev.type === "result";
+        if (rich && ev.content === lastRendered) continue; // skip duplicate assistant/result
         const row = document.createElement("div");
-        row.className = EVENT_COLORS[ev.type] || "text-zinc-300";
-        row.innerHTML = `<span class="text-zinc-600 mono">[${ev.type}]</span> <span class="whitespace-pre-wrap">${esc(ev.content)}</span>`;
+        if (rich) {
+          row.className = "border-t border-zinc-800/60 pt-2";
+          row.innerHTML = `<span class="text-zinc-600 mono text-[10px] uppercase">${ev.type}</span><div class="md-body">${renderRich(ev.content)}</div>`;
+          lastRendered = ev.content;
+        } else {
+          row.className = EVENT_COLORS[ev.type] || "text-zinc-300";
+          row.innerHTML = `<span class="text-zinc-600 mono">[${ev.type}]</span> <span class="whitespace-pre-wrap">${esc(ev.content)}</span>`;
+        }
         log.appendChild(row);
+        appended++;
       }
-      if (data.events.length) log.scrollTop = log.scrollHeight;
+      if (appended) log.scrollTop = log.scrollHeight;
     }
 
     // Detail controls
