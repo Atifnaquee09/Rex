@@ -2,6 +2,8 @@ import { DatabaseSync } from "node:sqlite";
 import type {
   Ticket,
   TicketStatus,
+  TicketPriority,
+  TicketType,
   TicketSource,
   Run,
   RunStatus,
@@ -22,7 +24,11 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
-    status TEXT NOT NULL DEFAULT 'open',
+    status TEXT NOT NULL DEFAULT 'todo',
+    priority TEXT NOT NULL DEFAULT 'medium',
+    type TEXT NOT NULL DEFAULT 'task',
+    assignee TEXT NOT NULL DEFAULT '',
+    queued INTEGER NOT NULL DEFAULT 0,
     source TEXT NOT NULL DEFAULT 'dashboard',
     created_by TEXT NOT NULL DEFAULT 'unknown',
     slack_channel TEXT,
@@ -104,6 +110,27 @@ try {
   db.exec("ALTER TABLE people ADD COLUMN title TEXT NOT NULL DEFAULT ''");
 } catch {
   /* column already exists */
+}
+
+// Migrations for tickets created before the Jira-style fields existed.
+for (const stmt of [
+  "ALTER TABLE tickets ADD COLUMN priority TEXT NOT NULL DEFAULT 'medium'",
+  "ALTER TABLE tickets ADD COLUMN type TEXT NOT NULL DEFAULT 'task'",
+  "ALTER TABLE tickets ADD COLUMN assignee TEXT NOT NULL DEFAULT ''",
+  "ALTER TABLE tickets ADD COLUMN queued INTEGER NOT NULL DEFAULT 0",
+]) {
+  try {
+    db.exec(stmt);
+  } catch {
+    /* column already exists */
+  }
+}
+// Remap any legacy statuses to the new board columns.
+try {
+  db.exec("UPDATE tickets SET status='backlog' WHERE status='open'");
+  db.exec("UPDATE tickets SET status='todo' WHERE status IN ('assigned','failed')");
+} catch {
+  /* ignore */
 }
 
 // --- Settings (key/value, with seeded defaults) ---
@@ -206,21 +233,54 @@ export function createTicket(input: {
   slack_channel?: string | null;
   slack_thread_ts?: string | null;
   status?: TicketStatus;
+  priority?: TicketPriority;
+  type?: TicketType;
+  assignee?: string;
+  queued?: boolean;
 }): Ticket {
   const stmt = db.prepare(`
-    INSERT INTO tickets (title, description, status, source, created_by, slack_channel, slack_thread_ts)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO tickets (title, description, status, priority, type, assignee, queued, source, created_by, slack_channel, slack_thread_ts)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const info = stmt.run(
     input.title,
     input.description ?? "",
-    input.status ?? "open",
+    input.status ?? "todo",
+    input.priority ?? "medium",
+    input.type ?? "task",
+    input.assignee ?? "",
+    input.queued ? 1 : 0,
     input.source ?? "dashboard",
     input.created_by ?? "unknown",
     input.slack_channel ?? null,
     input.slack_thread_ts ?? null,
   );
   return getTicket(Number(info.lastInsertRowid))!;
+}
+
+const PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
+
+export function updateTicket(
+  id: number,
+  fields: Partial<Pick<Ticket, "status" | "priority" | "type" | "assignee">>,
+): Ticket | undefined {
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+  for (const k of ["status", "priority", "type", "assignee"] as const) {
+    if (fields[k] !== undefined) {
+      sets.push(`${k} = ?`);
+      vals.push(fields[k]);
+    }
+  }
+  if (!sets.length) return getTicket(id);
+  vals.push(id);
+  db.prepare(`UPDATE tickets SET ${sets.join(", ")}, updated_at = datetime('now') WHERE id = ?`).run(...(vals as any[]));
+  return getTicket(id);
+}
+
+/** Flag a ticket for Rex to pick up and execute. */
+export function setQueued(id: number, queued = true): void {
+  db.prepare("UPDATE tickets SET queued = ?, updated_at = datetime('now') WHERE id = ?").run(queued ? 1 : 0, id);
 }
 
 export function getTicket(id: number): Ticket | undefined {
@@ -236,16 +296,20 @@ export function updateTicketStatus(id: number, status: TicketStatus): void {
 }
 
 /**
- * Atomically claim the oldest 'assigned' ticket and flip it to 'in_progress'.
+ * Atomically claim the highest-priority queued ticket and flip it to 'in_progress'.
  * Returns the claimed ticket or null. Single-worker safe.
  */
-export function claimNextAssignedTicket(): Ticket | null {
-  const row = db.prepare("SELECT * FROM tickets WHERE status = 'assigned' ORDER BY id ASC LIMIT 1").get() as
-    | Ticket
-    | undefined;
+export function claimNextQueuedTicket(): Ticket | null {
+  const row = db
+    .prepare(
+      `SELECT * FROM tickets WHERE queued = 1 AND status != 'in_progress'
+       ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, id ASC
+       LIMIT 1`,
+    )
+    .get() as unknown as Ticket | undefined;
   if (!row) return null;
   const res = db
-    .prepare("UPDATE tickets SET status = 'in_progress', updated_at = datetime('now') WHERE id = ? AND status = 'assigned'")
+    .prepare("UPDATE tickets SET status = 'in_progress', queued = 0, updated_at = datetime('now') WHERE id = ? AND queued = 1")
     .run(row.id);
   if (res.changes === 0) return null; // lost the race
   return getTicket(row.id)!;

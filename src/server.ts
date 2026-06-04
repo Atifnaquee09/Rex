@@ -6,7 +6,8 @@ import {
   createTicket,
   getTicket,
   listTickets,
-  updateTicketStatus,
+  updateTicket,
+  setQueued,
   listEvents,
   listRunsForTicket,
   stats,
@@ -32,6 +33,10 @@ const ROLES: PersonRole[] = ["exec", "business", "technical"];
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+const STATUSES = ["backlog", "todo", "in_progress", "in_review", "done"];
+const PRIORITIES = ["low", "medium", "high", "urgent"];
+const TYPES = ["task", "bug", "feature"];
+
 export function startServer(): void {
   const app = express();
   app.use(express.json());
@@ -42,9 +47,9 @@ export function startServer(): void {
     res.json(listTickets());
   });
 
-  // Create ticket (optionally auto-assign)
+  // Create ticket (optionally queue it for Rex immediately)
   app.post("/api/tickets", (req, res) => {
-    const { title, description, assign } = req.body ?? {};
+    const { title, description, assign, priority, type, assignee } = req.body ?? {};
     if (!title || typeof title !== "string") {
       res.status(400).json({ error: "title is required" });
       return;
@@ -52,11 +57,31 @@ export function startServer(): void {
     const ticket = createTicket({
       title: title.trim(),
       description: typeof description === "string" ? description : "",
+      priority: PRIORITIES.includes(priority) ? priority : "medium",
+      type: TYPES.includes(type) ? type : "task",
+      assignee: typeof assignee === "string" ? assignee.trim() : "",
       source: "dashboard",
       created_by: "dashboard",
-      status: assign ? "assigned" : "open",
+      status: "todo",
+      queued: Boolean(assign),
     });
     res.status(201).json(ticket);
+  });
+
+  // Update ticket fields (board move, priority, type, assignee)
+  app.patch("/api/tickets/:id", (req, res) => {
+    const id = Number(req.params.id);
+    if (!getTicket(id)) {
+      res.status(404).json({ error: "not found" });
+      return;
+    }
+    const { status, priority, type, assignee } = req.body ?? {};
+    const fields: Record<string, string> = {};
+    if (typeof status === "string" && STATUSES.includes(status)) fields.status = status;
+    if (typeof priority === "string" && PRIORITIES.includes(priority)) fields.priority = priority;
+    if (typeof type === "string" && TYPES.includes(type)) fields.type = type;
+    if (typeof assignee === "string") fields.assignee = assignee.trim();
+    res.json(updateTicket(id, fields as any));
   });
 
   // Ticket detail + events + runs
@@ -71,8 +96,8 @@ export function startServer(): void {
     res.json({ ticket, events: listEvents(id, afterId), runs: listRunsForTicket(id) });
   });
 
-  // Assign a ticket to Rex (queue it)
-  app.post("/api/tickets/:id/assign", (req, res) => {
+  // Run a ticket with Rex (queue it for the worker)
+  app.post("/api/tickets/:id/run", (req, res) => {
     const id = Number(req.params.id);
     const ticket = getTicket(id);
     if (!ticket) {
@@ -83,7 +108,7 @@ export function startServer(): void {
       res.status(409).json({ error: "already in progress" });
       return;
     }
-    updateTicketStatus(id, "assigned");
+    setQueued(id, true);
     res.json(getTicket(id));
   });
 

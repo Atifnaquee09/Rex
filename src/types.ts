@@ -1,11 +1,19 @@
-export type TicketStatus = "open" | "assigned" | "in_progress" | "done" | "failed";
+export type TicketStatus = "backlog" | "todo" | "in_progress" | "in_review" | "done";
+export type TicketPriority = "low" | "medium" | "high" | "urgent";
+export type TicketType = "task" | "bug" | "feature";
 export type TicketSource = "dashboard" | "slack";
+
+export const TICKET_STATUSES: TicketStatus[] = ["backlog", "todo", "in_progress", "in_review", "done"];
 
 export interface Ticket {
   id: number;
   title: string;
   description: string;
   status: TicketStatus;
+  priority: TicketPriority;
+  type: TicketType;
+  assignee: string;
+  queued: number;
   source: TicketSource;
   created_by: string;
   slack_channel: string | null;

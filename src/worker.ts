@@ -1,6 +1,6 @@
 import { config } from "./config.ts";
 import {
-  claimNextAssignedTicket,
+  claimNextQueuedTicket,
   createRun,
   finishRun,
   addEvent,
@@ -33,10 +33,11 @@ async function processTicket(ticket: Ticket): Promise<void> {
     result_summary: outcome.summary,
   });
 
-  updateTicketStatus(ticket.id, outcome.ok ? "done" : "failed");
+  // Rex's work lands in "In Review" for a human to sign off; failures go back to "To Do".
+  updateTicketStatus(ticket.id, outcome.ok ? "in_review" : "todo");
 
   const tokens = outcome.input_tokens + outcome.output_tokens;
-  const verb = outcome.ok ? ":white_check_mark: Done" : ":x: Failed";
+  const verb = outcome.ok ? ":white_check_mark: Done (in review)" : ":x: Failed";
   await notifySlack(
     ticket,
     `${verb} — *#${ticket.id}*\n${truncate(outcome.summary, 1500)}\n_Tokens: ${tokens.toLocaleString()} · Cost: $${outcome.cost_usd.toFixed(4)}_`,
@@ -45,14 +46,14 @@ async function processTicket(ticket: Ticket): Promise<void> {
 
 async function tick(): Promise<void> {
   if (running) return;
-  const ticket = claimNextAssignedTicket();
+  const ticket = claimNextQueuedTicket();
   if (!ticket) return;
   running = true;
   try {
     await processTicket(ticket);
   } catch (err) {
     addEvent(ticket.id, null, "error", `Worker error: ${err instanceof Error ? err.message : String(err)}`);
-    updateTicketStatus(ticket.id, "failed");
+    updateTicketStatus(ticket.id, "todo");
   } finally {
     running = false;
   }

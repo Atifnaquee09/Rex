@@ -240,7 +240,7 @@ async function fileTicket(args: {
     created_by: args.user,
     slack_channel: args.channel,
     slack_thread_ts: args.threadTs,
-    status: "assigned", // straight into the work queue
+    queued: true, // straight into the work queue for Rex
   });
   await args.say({
     thread_ts: args.threadTs,
