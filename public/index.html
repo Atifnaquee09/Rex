@@ -100,9 +100,11 @@
         <button id="d-run" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg px-3 py-1.5">▶ Run with Rex</button>
         <select id="d-status" class="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs"></select>
       </div>
-      <div id="d-run-info" class="text-xs text-zinc-400 mono mb-2"></div>
-      <div class="text-[11px] uppercase tracking-wide text-zinc-500 mb-2">Live activity</div>
-      <div id="d-log" class="bg-zinc-950 border border-zinc-800 rounded-lg p-3 h-[55vh] overflow-y-auto scroll space-y-2 text-xs"></div>
+      <div class="text-[11px] uppercase tracking-wide text-zinc-500 mb-1">Result</div>
+      <div id="d-result" class="bg-zinc-950 border border-zinc-800 rounded-lg p-4 mb-3 text-sm min-h-[60px]"><span class="text-zinc-600">No result yet — click “Run with Rex”.</span></div>
+      <div id="d-run-info" class="text-xs text-zinc-500 mono mb-3"></div>
+      <button id="d-toggle-log" class="text-[11px] uppercase tracking-wide text-zinc-500 mb-2 hover:text-zinc-300">▸ Activity log <span class="text-zinc-600 normal-case">(technical detail)</span></button>
+      <div id="d-log" class="hidden bg-zinc-950 border border-zinc-800 rounded-lg p-3 max-h-[45vh] overflow-y-auto scroll space-y-2 text-xs"></div>
     </div>
   </div>
 
@@ -210,9 +212,17 @@
       const sel = document.getElementById("d-status");
       sel.innerHTML = COLUMNS.map((c) => `<option value="${c.key}" ${c.key === t.status ? "selected" : ""}>${c.label}</option>`).join("");
       const run = data.runs[data.runs.length - 1];
+      const resultEl = document.getElementById("d-result");
+      if (t.status === "in_progress") {
+        resultEl.innerHTML = '<span class="text-indigo-300">Rex is working on it…</span>';
+      } else if (run && run.result_summary) {
+        resultEl.innerHTML = `<div class="md-body">${renderRich(run.result_summary)}</div>`;
+      } else if (!run) {
+        resultEl.innerHTML = '<span class="text-zinc-600">No result yet — click “Run with Rex”.</span>';
+      }
       document.getElementById("d-run-info").textContent = run
-        ? `run #${run.id} · ${run.model} · in ${run.input_tokens} / out ${run.output_tokens} · $${Number(run.cost_usd).toFixed(4)} · ${run.num_turns} turns`
-        : "no run yet";
+        ? `run #${run.id} · ${run.model} · ${(run.input_tokens + run.output_tokens).toLocaleString()} tokens · $${Number(run.cost_usd).toFixed(4)} · ${run.num_turns} turns`
+        : "";
       const log = document.getElementById("d-log");
       let appended = 0;
       for (const ev of data.events) {
@@ -236,6 +246,13 @@
 
     // Detail controls
     document.getElementById("d-close").addEventListener("click", closeDetail);
+    document.getElementById("d-toggle-log").addEventListener("click", (e) => {
+      const log = document.getElementById("d-log");
+      log.classList.toggle("hidden");
+      const open = !log.classList.contains("hidden");
+      e.currentTarget.innerHTML = `${open ? "▾" : "▸"} Activity log <span class="text-zinc-600 normal-case">(technical detail)</span>`;
+      if (open) log.scrollTop = log.scrollHeight;
+    });
     document.getElementById("d-run").addEventListener("click", async () => { if (selectedId != null) { await runRex(selectedId); refreshDetail(); } });
     document.getElementById("d-status").addEventListener("change", async (e) => {
       if (selectedId == null) return;
