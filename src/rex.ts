@@ -1,6 +1,7 @@
 import { query, type AgentDefinition } from "@anthropic-ai/claude-agent-sdk";
 import { config } from "./config.ts";
 import { getSetting, listPeople } from "./db.ts";
+import { kbEnabled, searchKnowledge } from "./knowledge.ts";
 import type { Ticket, EventType, PersonRole } from "./types.ts";
 
 export interface RunOutcome {
@@ -132,9 +133,25 @@ export async function triage(message: string, profile?: SpeakerProfile, context?
     : "";
   const membersBlock = channelMembers ? `People in this Slack channel (from their Slack profiles):\n${sanitizeContext(channelMembers)}` : "";
 
+  // Semantic recall: pull the most relevant knowledge-base entries for this message.
+  let kbBlock = "";
+  if (kbEnabled) {
+    try {
+      const hits = (await searchKnowledge(message, 4)).filter((h) => (h.similarity ?? 0) > 0.35);
+      if (hits.length) {
+        kbBlock = sanitizeContext(
+          "Relevant knowledge (use if helpful, ignore if not):\n" +
+            hits.map((h) => `- ${h.content.replace(/\s+/g, " ").slice(0, 500)}`).join("\n"),
+        );
+      }
+    } catch {
+      /* KB optional — never block a reply on it */
+    }
+  }
+
   // System prompt holds ONLY trusted instructions + sanitised reference data. Untrusted chat
   // context goes in the user turn, framed as data the model must not obey as instructions.
-  const system = [persona, ROUTING_RULES, AUDIENCE_GUIDE, profileLine, roster, membersBlock]
+  const system = [persona, ROUTING_RULES, AUDIENCE_GUIDE, profileLine, roster, membersBlock, kbBlock]
     .filter(Boolean)
     .join("\n\n");
   const prompt = context

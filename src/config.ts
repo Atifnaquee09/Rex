@@ -19,6 +19,7 @@ const authMode = process.env.CLAUDE_CODE_OAUTH_TOKEN
 
 export const config = {
   authMode,
+  databaseUrl: process.env.DATABASE_URL || "",
   workspace: required("REX_WORKSPACE"),
   model: process.env.REX_MODEL || "opus",
   maxTurns: Number(process.env.REX_MAX_TURNS || 40),

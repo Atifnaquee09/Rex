@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rex — Knowledge Base</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+    .scroll::-webkit-scrollbar { width: 8px; }
+    .scroll::-webkit-scrollbar-thumb { background: #27272a; border-radius: 8px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  </style>
+</head>
+<body class="bg-zinc-950 text-zinc-200 min-h-screen">
+  <div class="max-w-6xl mx-auto p-6">
+    <header class="flex items-center justify-between mb-6">
+      <div class="flex items-center gap-3">
+        <div class="h-10 w-10 rounded-lg bg-gradient-to-br from-indigo-500 to-fuchsia-600 grid place-items-center font-black text-white">R</div>
+        <div>
+          <h1 class="text-xl font-bold text-white leading-none">Rex — Knowledge Base</h1>
+          <p class="text-xs text-zinc-500 mt-1">Long-term memory · semantic search (pgvector) · Rex recalls this in replies</p>
+        </div>
+      </div>
+      <nav class="flex gap-2 text-sm">
+        <a href="/" class="px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300">Board</a>
+        <a href="/scripts.html" class="px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300">Shell Scripts</a>
+        <a href="/knowledge.html" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white">Knowledge</a>
+        <a href="/settings.html" class="px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300">Settings</a>
+      </nav>
+    </header>
+
+    <div id="disabled-banner" class="hidden bg-rose-500/10 border border-rose-500/30 rounded-xl px-4 py-2 mb-5 text-xs text-rose-300">
+      Knowledge base is not configured (no DATABASE_URL). Postgres + pgvector required.
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <!-- Add + search -->
+      <div class="space-y-4">
+        <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+          <h2 class="text-sm font-semibold text-white mb-3">Add knowledge</h2>
+          <textarea id="k-content" rows="5" placeholder="A fact, decision, doc, convention, or anything Rex should remember long-term…"
+            class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm mb-2 outline-none focus:border-indigo-500"></textarea>
+          <div class="flex gap-2">
+            <input id="k-source" placeholder="source (optional, e.g. 'policy')" class="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500" />
+            <button id="k-add" class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg px-4 py-2">Add</button>
+          </div>
+        </div>
+
+        <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+          <h2 class="text-sm font-semibold text-white mb-3">Search (semantic)</h2>
+          <div class="flex gap-2 mb-3">
+            <input id="k-query" placeholder="Ask by meaning, not keywords…" class="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm outline-none focus:border-indigo-500" />
+            <button id="k-search" class="bg-zinc-100 hover:bg-white text-zinc-900 text-sm font-semibold rounded-lg px-4 py-2">Search</button>
+          </div>
+          <div id="k-results" class="space-y-2 text-xs"></div>
+        </div>
+      </div>
+
+      <!-- All entries -->
+      <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+        <h2 class="text-sm font-semibold text-white mb-3">All knowledge <span id="k-count" class="text-zinc-600 text-xs"></span></h2>
+        <div id="k-list" class="space-y-2 max-h-[70vh] overflow-y-auto scroll pr-1 text-sm">
+          <p class="text-xs text-zinc-600">Nothing yet.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+    async function load() {
+      const data = await fetch("/api/knowledge").then((r) => r.json());
+      if (!data.enabled) { document.getElementById("disabled-banner").classList.remove("hidden"); return; }
+      const list = document.getElementById("k-list");
+      document.getElementById("k-count").textContent = `(${data.items.length})`;
+      if (!data.items.length) { list.innerHTML = '<p class="text-xs text-zinc-600">Nothing yet.</p>'; return; }
+      list.innerHTML = data.items.map((k) => `
+        <div class="rounded-lg border border-zinc-800 px-3 py-2">
+          <div class="flex items-start justify-between gap-2">
+            <span class="text-zinc-300 whitespace-pre-wrap">${esc(k.content)}</span>
+            <button data-del="${k.id}" class="text-rose-400 hover:text-rose-300 text-xs shrink-0">✕</button>
+          </div>
+          <div class="text-[10px] text-zinc-600 mt-1">#${k.id} · ${esc(k.source)} · ${k.created_at?.slice(0, 16).replace("T", " ")}</div>
+        </div>`).join("");
+      list.querySelectorAll("[data-del]").forEach((b) => b.addEventListener("click", async () => {
+        await fetch(`/api/knowledge/${b.dataset.del}`, { method: "DELETE" }); load();
+      }));
+    }
+
+    document.getElementById("k-add").addEventListener("click", async () => {
+      const content = document.getElementById("k-content").value.trim();
+      if (!content) return;
+      const btn = document.getElementById("k-add"); btn.textContent = "…"; btn.disabled = true;
+      await fetch("/api/knowledge", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content, source: document.getElementById("k-source").value.trim() || "manual" }) });
+      document.getElementById("k-content").value = ""; document.getElementById("k-source").value = "";
+      btn.textContent = "Add"; btn.disabled = false; load();
+    });
+
+    document.getElementById("k-search").addEventListener("click", async () => {
+      const query = document.getElementById("k-query").value.trim();
+      if (!query) return;
+      const el = document.getElementById("k-results"); el.innerHTML = '<span class="text-zinc-600">Searching…</span>';
+      const data = await fetch("/api/knowledge/search", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query }) }).then((r) => r.json());
+      if (!data.results.length) { el.innerHTML = '<span class="text-zinc-600">No matches.</span>'; return; }
+      el.innerHTML = data.results.map((r) => `
+        <div class="rounded-lg border border-zinc-800 px-3 py-2">
+          <div class="text-zinc-300 whitespace-pre-wrap">${esc(r.content)}</div>
+          <div class="text-[10px] text-emerald-400 mono mt-1">${(r.similarity * 100).toFixed(1)}% match · ${esc(r.source)}</div>
+        </div>`).join("");
+    });
+    document.getElementById("k-query").addEventListener("keydown", (e) => { if (e.key === "Enter") document.getElementById("k-search").click(); });
+
+    load();
+  </script>
+</body>
+</html>

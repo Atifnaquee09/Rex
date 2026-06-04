@@ -27,6 +27,7 @@ import {
   deletePerson,
 } from "./db.ts";
 import { runScript } from "./scripts.ts";
+import { kbEnabled, addKnowledge, listKnowledge, searchKnowledge, deleteKnowledge } from "./knowledge.ts";
 import type { PersonRole } from "./types.ts";
 
 const ROLES: PersonRole[] = ["exec", "business", "technical"];
@@ -157,6 +158,47 @@ export function startServer(): void {
 
   app.delete("/api/scripts/:id", (req, res) => {
     deleteScript(Number(req.params.id));
+    res.json({ ok: true });
+  });
+
+  // --- Knowledge base (pgvector semantic search) ---
+
+  app.get("/api/knowledge", async (_req, res) => {
+    if (!kbEnabled) {
+      res.json({ enabled: false, items: [] });
+      return;
+    }
+    res.json({ enabled: true, items: await listKnowledge() });
+  });
+
+  app.post("/api/knowledge", async (req, res) => {
+    if (!kbEnabled) {
+      res.status(503).json({ error: "knowledge base not configured" });
+      return;
+    }
+    const { content, source } = req.body ?? {};
+    if (!content || typeof content !== "string" || !content.trim()) {
+      res.status(400).json({ error: "content is required" });
+      return;
+    }
+    res.status(201).json(await addKnowledge(content.trim(), typeof source === "string" ? source : "manual"));
+  });
+
+  app.post("/api/knowledge/search", async (req, res) => {
+    if (!kbEnabled) {
+      res.json({ results: [] });
+      return;
+    }
+    const { query } = req.body ?? {};
+    if (!query || typeof query !== "string") {
+      res.status(400).json({ error: "query is required" });
+      return;
+    }
+    res.json({ results: await searchKnowledge(query.trim(), 8) });
+  });
+
+  app.delete("/api/knowledge/:id", async (req, res) => {
+    if (kbEnabled) await deleteKnowledge(Number(req.params.id));
     res.json({ ok: true });
   });
 

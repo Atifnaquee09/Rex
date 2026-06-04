@@ -2,10 +2,19 @@ import { config } from "./config.ts";
 import { startServer } from "./server.ts";
 import { startSlack } from "./slack.ts";
 import { startWorker } from "./worker.ts";
+import { kbEnabled, initKnowledge } from "./knowledge.ts";
 
 async function main() {
   console.log("=== Rex platform booting ===");
-  console.log(`[config] auth=${config.authMode} model=${config.model} workspace=${config.workspace} slack=${config.slack.enabled}`);
+  console.log(`[config] auth=${config.authMode} model=${config.model} workspace=${config.workspace} slack=${config.slack.enabled} kb=${kbEnabled}`);
+
+  if (kbEnabled) {
+    try {
+      await initKnowledge();
+    } catch (err) {
+      console.error("[knowledge] init failed (continuing without KB):", err instanceof Error ? err.message : err);
+    }
+  }
 
   startServer();
   startWorker();
