@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rex — Architecture</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .diagram { background: #09090b; border: 1px solid #27272a; border-radius: 12px; padding: 16px; overflow-x: auto; }
+    .mermaid { display: flex; justify-content: center; }
+  </style>
+</head>
+<body class="bg-zinc-950 text-zinc-200 min-h-screen">
+  <div class="max-w-6xl mx-auto p-6">
+    <header class="flex items-center justify-between mb-6">
+      <div class="flex items-center gap-3">
+        <div class="h-10 w-10 rounded-lg bg-gradient-to-br from-indigo-500 to-fuchsia-600 grid place-items-center font-black text-white">R</div>
+        <div>
+          <h1 class="text-xl font-bold text-white leading-none">Rex — Architecture</h1>
+          <p class="text-xs text-zinc-500 mt-1">How Rex is built and how a message flows through it</p>
+        </div>
+      </div>
+      <nav class="flex gap-2 text-sm flex-wrap">
+        <a href="/" class="px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300">Board</a>
+        <a href="/scripts.html" class="px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300">Shell Scripts</a>
+        <a href="/knowledge.html" class="px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300">Knowledge</a>
+        <a href="/architecture.html" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white">Architecture</a>
+        <a href="/settings.html" class="px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300">Settings</a>
+      </nav>
+    </header>
+
+    <div class="space-y-8">
+      <section>
+        <h2 class="text-sm font-semibold text-white mb-1">1 · System topology</h2>
+        <p class="text-xs text-zinc-500 mb-3">One Node service on a single VPS runs the Slack bot, ticket worker, and dashboard. Embeddings are local; only Claude is remote.</p>
+        <div class="diagram"><pre class="mermaid">
+flowchart TB
+  U["People in Slack"]
+  B["Browser - dashboard"]
+  SAPP["Slack App 'Rex' - Socket Mode"]
+  subgraph VPS["VPS - non-root user 'rex'"]
+    NGINX["nginx - TLS + Basic Auth"]
+    subgraph REX["rex.service - one Node 24 process"]
+      SLACK["Slack bot (Bolt)"]
+      WORKER["Ticket worker"]
+      SERVER["API + dashboard"]
+      RUNNER["Rex runner - Agent SDK"]
+      KB["Knowledge module"]
+    end
+    SQLITE[("SQLite rex.db")]
+    PG[("Postgres + pgvector")]
+    EMB["Local embeddings - MiniLM"]
+  end
+  CLAUDE["Claude - Max subscription"]
+  U <--> SAPP
+  SAPP <--> SLACK
+  B --> NGINX
+  NGINX --> SERVER
+  SLACK --> RUNNER
+  WORKER --> RUNNER
+  RUNNER --> CLAUDE
+  SLACK --> SQLITE
+  WORKER --> SQLITE
+  SERVER --> SQLITE
+  KB --> PG
+  KB --> EMB
+  SLACK --> KB
+  SERVER --> KB
+        </pre></div>
+      </section>
+
+      <section>
+        <h2 class="text-sm font-semibold text-white mb-1">2 · Slack message pipeline</h2>
+        <p class="text-xs text-zinc-500 mb-3">Cheap, deterministic checks run first. The model is only called when a message is genuinely a task, an admin action, or open conversation.</p>
+        <div class="diagram"><pre class="mermaid">
+flowchart TD
+  A["Slack mention or DM"] --> D{"Duplicate event?"}
+  D -->|yes| X["drop"]
+  D -->|no| E{"Contains '::' ?"}
+  E -->|yes| T1["File ticket directly"]
+  E -->|no| TR{"Trivial - hi/thanks?"}
+  TR -->|yes| LITE["Light reply - skip roster + KB"]
+  TR -->|no| ADM{"Admin request? verb + context"}
+  ADM -->|yes| ADMDO["Create/archive/invite/kick - admins only"]
+  ADM -->|no| REL{"Mentions another person?"}
+  REL -->|yes| RELDO["Relay message to them"]
+  REL -->|no| CTX["Gather: thread history + team roster + KB recall"]
+  CTX --> TRI{"Triage - model"}
+  TRI -->|TASK| T2["File ticket - queue for worker"]
+  TRI -->|CHAT| CH["Reply in Rex's persona"]
+        </pre></div>
+      </section>
+
+      <section>
+        <h2 class="text-sm font-semibold text-white mb-1">3 · Ticket execution</h2>
+        <p class="text-xs text-zinc-500 mb-3">"Run with Rex" queues a ticket. The worker claims the highest-priority one and runs the Agent SDK against the repo. Results land in In Review.</p>
+        <div class="diagram"><pre class="mermaid">
+flowchart LR
+  RUN["Run with Rex / Slack ticket"] --> Q[("Queue - SQLite")]
+  WORKER["Worker loop - every 3s"] --> Q
+  WORKER --> AGENT["Agent SDK - bypass + guardrails - explorer/reviewer subagents"]
+  AGENT --> WS[("Repo workspace")]
+  AGENT --> REC[("Run record - tokens, cost, result")]
+  AGENT -->|success| IR["In Review"]
+  AGENT -->|failure| TODO["To Do"]
+  AGENT --> SUP["Slack update with #id"]
+        </pre></div>
+      </section>
+
+      <section>
+        <h2 class="text-sm font-semibold text-white mb-1">4 · Knowledge base (semantic recall)</h2>
+        <p class="text-xs text-zinc-500 mb-3">Embeddings run on-box (free, zero Claude tokens). Recall is selective top-K, so the prompt stays small no matter how big the knowledge base grows.</p>
+        <div class="diagram"><pre class="mermaid">
+flowchart LR
+  ADD["Add knowledge"] --> EMB1["Local embed 384-d"]
+  EMB1 --> STORE[("pgvector store")]
+  MSG["Incoming message"] --> EMB2["Local embed query"]
+  EMB2 --> SRCH["Top-K cosine search + threshold"]
+  SRCH --> STORE
+  SRCH --> INJ["Inject top snippets into prompt"]
+  INJ --> REPLY["Grounded reply"]
+        </pre></div>
+      </section>
+
+      <section>
+        <h2 class="text-sm font-semibold text-white mb-1">5 · Security boundaries</h2>
+        <div class="diagram"><pre class="mermaid">
+flowchart TB
+  NET["Public internet"] --> AUTH["nginx - TLS + Basic Auth"]
+  AUTH --> APP["Rex - bound to 127.0.0.1"]
+  APP --> NONROOT["Runs as non-root 'rex' - cannot touch prod or run privileged ops"]
+  ADMINREQ["Slack admin action"] --> GATE{"Workspace admin?"}
+  GATE -->|no| DENY["Refused"]
+  GATE -->|yes| DO["Execute + audit"]
+  UNTRUSTED["Untrusted chat text"] --> SANI["Sanitised + placed in user turn - blocks prompt injection"]
+        </pre></div>
+      </section>
+    </div>
+  </div>
+
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({ startOnLoad: true, theme: "dark", themeVariables: { fontSize: "13px" }, flowchart: { useMaxWidth: true } });
+  </script>
+</body>
+</html>
