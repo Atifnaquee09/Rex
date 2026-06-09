@@ -1,7 +1,7 @@
 import { App } from "@slack/bolt";
 import { config } from "./config.ts";
 import { createTicket, getPersonBySlackId, getSetting } from "./db.ts";
-import { triage, parseAdminIntent } from "./rex.ts";
+import { triage, parseAdminIntent, isTrivial } from "./rex.ts";
 import type { Ticket } from "./types.ts";
 
 let app: App | null = null;
@@ -56,8 +56,11 @@ async function userLabel(uid: string, botUserId?: string): Promise<string> {
 // so Rex can answer "who's the designer" without manual setup. Needs channels:read/groups:read
 // + users:read; degrades to "" if unavailable. Titles are user-set, so they're length-capped
 // and newline-stripped before reaching the model.
+const rosterCache = new Map<string, { text: string; ts: number }>();
 async function channelRoster(channel: string, botUserId?: string): Promise<string> {
   if (!app) return "";
+  const cached = rosterCache.get(channel);
+  if (cached && Date.now() - cached.ts < 300_000) return cached.text; // 5-min cache
   try {
     const res: any = await app.client.conversations.members({ channel, limit: 50 });
     const lines: string[] = [];
@@ -73,7 +76,9 @@ async function channelRoster(channel: string, botUserId?: string): Promise<strin
         /* skip member we can't resolve */
       }
     }
-    return lines.join("\n");
+    const text = lines.join("\n");
+    rosterCache.set(channel, { text, ts: Date.now() });
+    return text;
   } catch {
     return "";
   }
@@ -116,8 +121,13 @@ async function handleAdmin(
   text: string,
 ): Promise<boolean> {
   if (!app) return false;
-  // Cheap pre-filter so normal chat doesn't trigger an extra model call.
-  if (!/\b(create|archive|delete|remove|kick|add|invite|channel|group)\b/i.test(text)) return false;
+  // Pre-filter: need an admin VERB *and* a channel/member context signal, so normal coding chat
+  // ("add a divide function") doesn't trigger a second model call.
+  const hasVerb = /\b(create|archive|delete|remove|kick|add|invite)\b/i.test(text);
+  const hasContext =
+    /\b(channel|group|members?|people|everyone|team|developers?|designers?|engineers?|qa|testers?|writers?|marketers?)\b/i.test(text) ||
+    /<@[A-Z0-9]+>/.test(args.text);
+  if (!hasVerb || !hasContext) return false;
 
   const intent = await parseAdminIntent(args.text);
   if (intent.action === "none") return false;
@@ -301,8 +311,10 @@ async function handleInbound(args: {
   // If we know who this is (team profile), pass their role so Rex adapts deterministically.
   const person = getPersonBySlackId(args.user);
   const profile = person ? { name: person.name, role: person.role, notes: person.notes } : undefined;
-  const context = await threadContext(args.channel, args.threadTs, args.botUserId);
-  const members = await channelRoster(args.channel, args.botUserId);
+  // Greetings/short messages skip the expensive Slack fetches (thread history + member roster).
+  const trivial = isTrivial(text);
+  const context = trivial ? "" : await threadContext(args.channel, args.threadTs, args.botUserId);
+  const members = trivial ? "" : await channelRoster(args.channel, args.botUserId);
   const decision = await triage(text, profile, context, members);
 
   if (decision.kind === "relay") {

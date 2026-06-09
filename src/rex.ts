@@ -107,6 +107,12 @@ async function modelText(prompt: string, options: Record<string, unknown>, retri
   throw lastErr;
 }
 
+/** Trivial messages (greetings, very short) skip the expensive context-gathering to save tokens/API calls. */
+export function isTrivial(text: string): boolean {
+  const t = text.trim();
+  return t.length < 12 || /^(hi|hey|hello|yo|sup|thanks|thank you|ty|ok|okay|k|cool|nice|gm|gn|good (morning|night|evening|afternoon))\b/i.test(t);
+}
+
 /** Sanitise a single user-entered field (name/title/notes) before placing it in the system prompt. */
 function sanitizeField(s: string): string {
   return (s || "")
@@ -122,20 +128,23 @@ export async function triage(message: string, profile?: SpeakerProfile, context?
   const profileLine = profile
     ? `The person who just wrote is ${sanitizeField(profile.name)}, whose role is "${profile.role}".${profile.notes ? " Notes: " + sanitizeField(profile.notes) : ""} Tailor your reply to them specifically.`
     : "Infer the audience (business vs technical) from how they write.";
+  // Greetings/short messages skip roster + KB injection entirely — saves input tokens.
+  const trivial = isTrivial(message);
+
   // Team roster — dashboard profiles plus live Slack channel members. User-entered fields are
   // sanitised before going into the system prompt to block prompt injection via names/titles.
-  const team = listPeople();
+  const team = trivial ? [] : listPeople();
   const roster = team.length
     ? "Team directory (from the dashboard):\n" +
       team
         .map((p) => `- ${sanitizeField(p.name)}${p.title ? `, ${sanitizeField(p.title)}` : ""} — talk to them as ${p.role}${p.notes ? `; ${sanitizeField(p.notes)}` : ""}`)
         .join("\n")
     : "";
-  const membersBlock = channelMembers ? `People in this Slack channel (from their Slack profiles):\n${sanitizeContext(channelMembers)}` : "";
+  const membersBlock = !trivial && channelMembers ? `People in this Slack channel (from their Slack profiles):\n${sanitizeContext(channelMembers)}` : "";
 
   // Semantic recall: pull the most relevant knowledge-base entries for this message.
   let kbBlock = "";
-  if (kbEnabled) {
+  if (kbEnabled && !trivial) {
     try {
       const hits = (await searchKnowledge(message, 4)).filter((h) => (h.similarity ?? 0) > 0.35);
       if (hits.length) {
