@@ -2,6 +2,7 @@ import { query, type AgentDefinition } from "@anthropic-ai/claude-agent-sdk";
 import { config } from "./config.ts";
 import { getSetting, listPeople } from "./db.ts";
 import { kbEnabled, searchKnowledge } from "./knowledge.ts";
+import { memoryEnabled, recallMemory } from "./memory.ts";
 import type { Ticket, EventType, PersonRole } from "./types.ts";
 
 export interface RunOutcome {
@@ -158,9 +159,20 @@ export async function triage(message: string, profile?: SpeakerProfile, context?
     }
   }
 
+  // Long-term memory via QMD (markdown notes + past sessions). BM25 keyword search — light.
+  let memBlock = "";
+  if (memoryEnabled && !trivial) {
+    try {
+      const mem = await recallMemory(message);
+      if (mem) memBlock = sanitizeContext("Relevant memory (project notes + past sessions):\n" + mem);
+    } catch {
+      /* memory optional */
+    }
+  }
+
   // System prompt holds ONLY trusted instructions + sanitised reference data. Untrusted chat
   // context goes in the user turn, framed as data the model must not obey as instructions.
-  const system = [persona, ROUTING_RULES, AUDIENCE_GUIDE, profileLine, roster, membersBlock, kbBlock]
+  const system = [persona, ROUTING_RULES, AUDIENCE_GUIDE, profileLine, roster, membersBlock, kbBlock, memBlock]
     .filter(Boolean)
     .join("\n\n");
   const prompt = context
