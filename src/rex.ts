@@ -146,8 +146,34 @@ async function modelText(prompt: string, options: Record<string, unknown>, retri
   throw lastErr;
 }
 
-/** Reject internal/private/link-local targets so user-supplied URLs can't be used for SSRF. */
-function isPublicHttpUrl(raw: string): boolean {
+function v4Blocked(ip: string): boolean {
+  const m = ip.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!m) return false;
+  const a = Number(m[1]);
+  const b = Number(m[2]);
+  if (a === 0 || a === 127) return true; // this-host / loopback
+  if (a === 10) return true; // private
+  if (a === 192 && b === 168) return true; // private
+  if (a === 172 && b >= 16 && b <= 31) return true; // private
+  if (a === 169 && b === 254) return true; // link-local / cloud metadata
+  if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT 100.64/10
+  return false;
+}
+
+function ipBlocked(ip: string): boolean {
+  ip = ip.toLowerCase().replace(/^\[|\]$/g, "");
+  if (ip.includes(":")) {
+    if (ip === "::1" || ip === "::") return true;
+    if (ip.startsWith("fe80") || ip.startsWith("fc") || ip.startsWith("fd")) return true; // link-local / ULA
+    const mapped = ip.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/); // IPv4-mapped
+    if (mapped) return v4Blocked(mapped[1]);
+    return false;
+  }
+  return v4Blocked(ip);
+}
+
+/** Reject internal/private targets, RESOLVING hostnames so a public name pointing at a private IP is blocked. */
+async function isPublicHttpUrl(raw: string): Promise<boolean> {
   let u: URL;
   try {
     u = new URL(raw);
@@ -155,20 +181,18 @@ function isPublicHttpUrl(raw: string): boolean {
     return false;
   }
   if (u.protocol !== "http:" && u.protocol !== "https:") return false;
-  const h = u.hostname.toLowerCase();
-  if (h === "localhost" || h.endsWith(".localhost") || h.endsWith(".internal") || h.endsWith(".local")) return false;
-  if (h === "::1" || h.startsWith("fe80") || h.startsWith("fc") || h.startsWith("fd")) return false; // IPv6 loopback/ULA/link-local
-  const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (m) {
-    const a = Number(m[1]);
-    const b = Number(m[2]);
-    if (a === 0 || a === 127) return false; // this-host / loopback
-    if (a === 10) return false; // private
-    if (a === 192 && b === 168) return false; // private
-    if (a === 172 && b >= 16 && b <= 31) return false; // private
-    if (a === 169 && b === 254) return false; // link-local / cloud metadata
+  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".internal") || host.endsWith(".local")) return false;
+  // Literal IP — check directly.
+  if (host.includes(":") || /^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return !ipBlocked(host);
+  // Hostname — resolve ALL addresses; block if any is internal (defeats DNS-based bypass).
+  try {
+    const { lookup } = await import("node:dns/promises");
+    const addrs = await lookup(host, { all: true });
+    return addrs.length > 0 && !addrs.some((a) => ipBlocked(a.address));
+  } catch {
+    return false; // unresolvable → don't fetch
   }
-  return true;
 }
 
 /** Auto-approve only WebSearch and WebFetch to PUBLIC URLs — replaces blanket bypassPermissions. */
@@ -176,7 +200,7 @@ export const webCanUseTool: CanUseTool = async (toolName, input) => {
   if (toolName === "WebSearch") return { behavior: "allow", updatedInput: input };
   if (toolName === "WebFetch") {
     const url = String((input as any)?.url ?? "");
-    if (isPublicHttpUrl(url)) return { behavior: "allow", updatedInput: input };
+    if (await isPublicHttpUrl(url)) return { behavior: "allow", updatedInput: input };
     return { behavior: "deny", message: "Refusing to fetch an internal/private URL (SSRF guard)." };
   }
   return { behavior: "deny", message: `Tool ${toolName} is not permitted here.` };
