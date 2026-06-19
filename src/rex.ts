@@ -12,7 +12,15 @@ export const REX_BEHAVIOR = `## How you work
   considered, structured answer. Never leave someone waiting in silence, and never blurt a
   shallow answer before actually reading.
 - You are the SAME Rex everywhere — Slack, this terminal, tickets. Same identity, memory, judgment.
-- Lean, honest, opinionated. Plain language for non-technical people, depth for engineers.`;
+- Lean, honest, opinionated. Plain language for non-technical people, depth for engineers.
+
+## Use your memory — never claim ignorance without checking
+You have extensive long-term memory about the user's projects (OneGoal, LawTribe, KeyVent,
+E-Notary, and more). Before you EVER say "I don't have memory of that" or "I don't know about
+that project", you MUST check first:
+- In this terminal: search and read the relevant files under /home/rex/memory/ (grep/ls/read).
+- In Slack: the relevant memory is already injected into your context — read it and use it.
+If it's in your memory, answer from it confidently. Only say you lack info after you've actually looked.`;
 
 const WORKING_STATE = `## Working memory across long sessions (context hygiene)
 You run long interactive sessions, and output quality quietly drops as the context fills up.
@@ -265,10 +273,10 @@ export async function triage(message: string, profile?: SpeakerProfile, context?
   let kbBlock = "";
   if (kbEnabled && !trivial) {
     try {
-      const hits = (await searchKnowledge(message, 4)).filter((h) => (h.similarity ?? 0) > 0.35);
+      const hits = (await searchKnowledge(message, 6)).filter((h) => (h.similarity ?? 0) > 0.28);
       if (hits.length) {
         kbBlock = sanitizeContext(
-          "Relevant knowledge (use if helpful, ignore if not):\n" +
+          "Your memory about the user's projects/work (USE this to answer — do NOT claim you lack memory of anything shown here):\n" +
             hits.map((h) => `- ${h.content.replace(/\s+/g, " ").slice(0, 700)}`).join("\n"),
         );
       }
@@ -378,10 +386,10 @@ export async function chatReply(message: string): Promise<string> {
   let kb = "";
   if (kbEnabled && !isTrivial(message)) {
     try {
-      const hits = (await searchKnowledge(message, 4)).filter((h) => (h.similarity ?? 0) > 0.35);
+      const hits = (await searchKnowledge(message, 6)).filter((h) => (h.similarity ?? 0) > 0.28);
       if (hits.length) {
         kb = sanitizeContext(
-          "Relevant memory (project notes; use if helpful):\n" +
+          "Your memory about the user's projects/work (USE this — don't claim you lack memory of anything shown here):\n" +
             hits.map((h) => `- ${h.content.replace(/\s+/g, " ").slice(0, 700)}`).join("\n"),
         );
       }
@@ -410,9 +418,9 @@ export async function consideredReply(message: string, profile?: SpeakerProfile,
   let kb = "";
   if (kbEnabled) {
     try {
-      const hits = (await searchKnowledge(message, 4)).filter((h) => (h.similarity ?? 0) > 0.35);
+      const hits = (await searchKnowledge(message, 6)).filter((h) => (h.similarity ?? 0) > 0.28);
       if (hits.length) {
-        kb = sanitizeContext("Relevant memory (use if helpful):\n" + hits.map((h) => `- ${h.content.replace(/\s+/g, " ").slice(0, 700)}`).join("\n"));
+        kb = sanitizeContext("Your memory about the user's projects/work (USE this — don't claim ignorance of anything shown here):\n" + hits.map((h) => `- ${h.content.replace(/\s+/g, " ").slice(0, 700)}`).join("\n"));
       }
     } catch {
       /* memory optional */
