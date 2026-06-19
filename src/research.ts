@@ -1,5 +1,6 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { createArtifact, setArtifact } from "./artifacts.ts";
+import { webCanUseTool } from "./rex.ts";
 
 const RESEARCH_SYSTEM = `You are Rex, a sharp, skeptical research analyst. Research the user's topic
 THOROUGHLY using web search and by fetching real sources.
@@ -31,8 +32,7 @@ export async function runResearch(topic: string): Promise<string> {
       systemPrompt: RESEARCH_SYSTEM,
       allowedTools: ["WebSearch", "WebFetch"],
       maxTurns: 12,
-      permissionMode: "bypassPermissions",
-      allowDangerouslySkipPermissions: true,
+      canUseTool: webCanUseTool,
     },
   })) {
     if (m.type === "result") out = ((m as any).result ?? "").trim();

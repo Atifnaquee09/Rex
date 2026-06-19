@@ -1,6 +1,6 @@
 import { writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { query, type AgentDefinition } from "@anthropic-ai/claude-agent-sdk";
+import { query, type AgentDefinition, type CanUseTool } from "@anthropic-ai/claude-agent-sdk";
 import { config } from "./config.ts";
 import { getSetting, listPeople } from "./db.ts";
 import { kbEnabled, searchKnowledge } from "./knowledge.ts";
@@ -145,6 +145,42 @@ async function modelText(prompt: string, options: Record<string, unknown>, retri
   }
   throw lastErr;
 }
+
+/** Reject internal/private/link-local targets so user-supplied URLs can't be used for SSRF. */
+function isPublicHttpUrl(raw: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+  const h = u.hostname.toLowerCase();
+  if (h === "localhost" || h.endsWith(".localhost") || h.endsWith(".internal") || h.endsWith(".local")) return false;
+  if (h === "::1" || h.startsWith("fe80") || h.startsWith("fc") || h.startsWith("fd")) return false; // IPv6 loopback/ULA/link-local
+  const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (m) {
+    const a = Number(m[1]);
+    const b = Number(m[2]);
+    if (a === 0 || a === 127) return false; // this-host / loopback
+    if (a === 10) return false; // private
+    if (a === 192 && b === 168) return false; // private
+    if (a === 172 && b >= 16 && b <= 31) return false; // private
+    if (a === 169 && b === 254) return false; // link-local / cloud metadata
+  }
+  return true;
+}
+
+/** Auto-approve only WebSearch and WebFetch to PUBLIC URLs — replaces blanket bypassPermissions. */
+export const webCanUseTool: CanUseTool = async (toolName, input) => {
+  if (toolName === "WebSearch") return { behavior: "allow", updatedInput: input };
+  if (toolName === "WebFetch") {
+    const url = String((input as any)?.url ?? "");
+    if (isPublicHttpUrl(url)) return { behavior: "allow", updatedInput: input };
+    return { behavior: "deny", message: "Refusing to fetch an internal/private URL (SSRF guard)." };
+  }
+  return { behavior: "deny", message: `Tool ${toolName} is not permitted here.` };
+};
 
 /** Trivial messages (greetings, very short) skip the expensive context-gathering to save tokens/API calls. */
 export function isTrivial(text: string): boolean {
@@ -359,8 +395,7 @@ export async function consideredReply(message: string, profile?: SpeakerProfile,
         systemPrompt: system,
         allowedTools: ["WebFetch", "WebSearch"],
         maxTurns: 14,
-        permissionMode: "bypassPermissions",
-        allowDangerouslySkipPermissions: true,
+        canUseTool: webCanUseTool,
       },
     })) {
       if (m.type === "result") out = ((m as any).result ?? "").trim();
