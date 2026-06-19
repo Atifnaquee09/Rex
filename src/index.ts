@@ -3,6 +3,7 @@ import { startServer } from "./server.ts";
 import { startSlack } from "./slack.ts";
 import { startWorker } from "./worker.ts";
 import { kbEnabled, initKnowledge } from "./knowledge.ts";
+import { writeBrainFile } from "./rex.ts";
 
 async function main() {
   console.log("=== Rex platform booting ===");
@@ -15,6 +16,8 @@ async function main() {
       console.error("[knowledge] init failed (continuing without KB):", err instanceof Error ? err.message : err);
     }
   }
+
+  writeBrainFile(); // keep the terminal's ~/.claude/CLAUDE.md in sync with the persona
 
   startServer();
   startWorker();

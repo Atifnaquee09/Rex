@@ -1,7 +1,7 @@
 import { App } from "@slack/bolt";
 import { config } from "./config.ts";
 import { createTicket, getPersonBySlackId, getSetting } from "./db.ts";
-import { triage, parseAdminIntent, isTrivial } from "./rex.ts";
+import { triage, parseAdminIntent, isTrivial, consideredReply } from "./rex.ts";
 import { startResearch } from "./research.ts";
 import type { Ticket } from "./types.ts";
 
@@ -283,6 +283,22 @@ async function handleInbound(args: {
       thread_ts: args.threadTs,
       text: `:mag: On it — researching *${topic.slice(0, 140)}*.\nReport (ready in a few minutes, lives 24h): ${config.publicUrl}/r/${id}`,
     });
+    return;
+  }
+
+  // Acknowledge-then-deliver: a shared link/document or a "review / analyze / go through this"
+  // request takes real work. Ack immediately, then read + think async, then post the real answer.
+  const unwrapped = text.replace(/<(https?:\/\/[^|>]+)(\|[^>]*)?>/g, "$1");
+  const hasUrl = /https?:\/\/\S+/i.test(unwrapped);
+  const heavyIntent = /\b(review|analy[sz]e|go through|read (this|the|it)|look (at|into)|evaluate|assess|summari[sz]e|feedback on)\b/i.test(unwrapped);
+  if ((hasUrl || heavyIntent) && !isTrivial(unwrapped)) {
+    await args.say({ thread_ts: args.threadTs, text: ":eyes: On it — going through it now. I'll come back with my take in a moment." });
+    const person = getPersonBySlackId(args.user);
+    const profile = person ? { name: person.name, role: person.role, notes: person.notes } : undefined;
+    const ctx = await threadContext(args.channel, args.threadTs, args.botUserId);
+    consideredReply(unwrapped, profile, ctx)
+      .then((reply) => args.say({ thread_ts: args.threadTs, text: reply }))
+      .catch(() => args.say({ thread_ts: args.threadTs, text: "I hit a snag working through that — mind resending it?" }));
     return;
   }
 

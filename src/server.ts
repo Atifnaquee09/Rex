@@ -28,7 +28,7 @@ import {
 } from "./db.ts";
 import { runScript } from "./scripts.ts";
 import { kbEnabled, addKnowledge, listKnowledge, searchKnowledge, deleteKnowledge } from "./knowledge.ts";
-import { chatReply } from "./rex.ts";
+import { chatReply, writeBrainFile } from "./rex.ts";
 import { getArtifact, listArtifacts, type Artifact } from "./artifacts.ts";
 import { startResearch } from "./research.ts";
 import type { PersonRole } from "./types.ts";
@@ -323,6 +323,7 @@ export function startServer(): void {
     for (const key of ["persona", "standards", "slack_updates_channel"]) {
       if (typeof body[key] === "string") setSetting(key, body[key]);
     }
+    if (typeof body.persona === "string") writeBrainFile(); // keep the terminal brain in sync
     res.json(allSettings());
   });
 

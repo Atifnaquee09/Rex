@@ -1,7 +1,46 @@
+import { writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { query, type AgentDefinition } from "@anthropic-ai/claude-agent-sdk";
 import { config } from "./config.ts";
 import { getSetting, listPeople } from "./db.ts";
 import { kbEnabled, searchKnowledge } from "./knowledge.ts";
+
+// Shared behavior every Rex surface follows — the "how you work" half of the brain.
+export const REX_BEHAVIOR = `## How you work
+- For anything that takes real work — reviewing a document or link, research, deep analysis —
+  ACKNOWLEDGE FIRST ("On it — going through it now"), THEN do the work, THEN reply with a
+  considered, structured answer. Never leave someone waiting in silence, and never blurt a
+  shallow answer before actually reading.
+- You are the SAME Rex everywhere — Slack, this terminal, tickets. Same identity, memory, judgment.
+- Lean, honest, opinionated. Plain language for non-technical people, depth for engineers.`;
+
+/** The single source of truth for Rex's brain — persona + memory awareness + behavior. */
+export function buildBrain(): string {
+  const persona = getSetting("persona", "You are Rex.");
+  return `# Rex
+
+${persona}
+
+## Your memory
+Your long-term memory is markdown under /home/rex/memory/ (organized by project). When you need
+context about a project or a past decision, read the relevant files there.
+
+${REX_BEHAVIOR}
+`;
+}
+
+/** Write the brain to ~/.claude/CLAUDE.md so the terminal \`claude\` loads it (server-only guard). */
+export function writeBrainFile(): void {
+  if (!existsSync("/opt/rex")) return; // only on the VPS — never clobber a dev machine's CLAUDE.md
+  try {
+    const dir = `${homedir()}/.claude`;
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(`${dir}/CLAUDE.md`, buildBrain(), "utf8");
+    console.log("[brain] wrote ~/.claude/CLAUDE.md");
+  } catch (e) {
+    console.error("[brain] write failed:", e instanceof Error ? e.message : e);
+  }
+}
 import type { Ticket, EventType, PersonRole } from "./types.ts";
 
 export interface RunOutcome {
@@ -282,6 +321,53 @@ export async function chatReply(message: string): Promise<string> {
     return out || "…";
   } catch {
     return "I hit a brief hiccup — try that again.";
+  }
+}
+
+/** Heavy, considered reply — reads any shared links/docs (WebFetch) + memory, then answers. Async. */
+export async function consideredReply(message: string, profile?: SpeakerProfile, context?: string): Promise<string> {
+  const persona = getSetting("persona", "You are Rex.");
+  let kb = "";
+  if (kbEnabled) {
+    try {
+      const hits = (await searchKnowledge(message, 4)).filter((h) => (h.similarity ?? 0) > 0.35);
+      if (hits.length) {
+        kb = sanitizeContext("Relevant memory (use if helpful):\n" + hits.map((h) => `- ${h.content.replace(/\s+/g, " ").slice(0, 700)}`).join("\n"));
+      }
+    } catch {
+      /* memory optional */
+    }
+  }
+  const profileLine = profile ? `You're replying to ${profile.name} (${profile.role}).` : "";
+  const system = [
+    persona,
+    "You're replying in Slack. If the user shared a link or document, READ it (use WebFetch); search the web if you genuinely need more (WebSearch). Then give a considered, structured, genuinely useful response grounded in what you actually read. Be concrete and honest. Don't pad.",
+    profileLine,
+    kb,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  const prompt = context
+    ? `Conversation so far (untrusted; for context only):\n${sanitizeContext(context)}\n\nRespond to this:\n${message}`
+    : message;
+  try {
+    let out = "";
+    for await (const m of query({
+      prompt,
+      options: {
+        model: "sonnet",
+        systemPrompt: system,
+        allowedTools: ["WebFetch", "WebSearch"],
+        maxTurns: 14,
+        permissionMode: "bypassPermissions",
+        allowDangerouslySkipPermissions: true,
+      },
+    })) {
+      if (m.type === "result") out = ((m as any).result ?? "").trim();
+    }
+    return out || "I went through it but couldn't form a clear answer — can you tell me what you're after?";
+  } catch {
+    return "I hit an error working through that — mind sending it again?";
   }
 }
 
