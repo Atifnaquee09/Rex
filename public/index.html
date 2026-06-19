@@ -76,6 +76,11 @@
         </select>
         <input id="c-assignee" placeholder="Assignee" class="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-2 text-sm outline-none focus:border-indigo-500" />
       </div>
+      <div class="grid grid-cols-4 gap-2 mb-2">
+        <input id="c-verify" class="col-span-3 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-2 text-sm mono outline-none focus:border-indigo-500" placeholder="Verify command (optional) — e.g. npm test" />
+        <input id="c-maxturns" type="number" min="0" max="200" class="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-2 text-sm outline-none focus:border-indigo-500" placeholder="Max turns" />
+      </div>
+      <p class="text-[11px] text-zinc-600 mb-2">If a verify command is set, Rex must pass it before the ticket counts as done (one auto fix-up retry).</p>
       <label class="flex items-center gap-2 text-xs text-zinc-400 mb-3">
         <input type="checkbox" id="c-run" class="accent-indigo-500" /> Run with Rex immediately
       </label>
@@ -277,10 +282,12 @@
           type: document.getElementById("c-type").value,
           priority: document.getElementById("c-priority").value,
           assignee: document.getElementById("c-assignee").value.trim(),
+          verify_cmd: document.getElementById("c-verify").value.trim(),
+          max_turns: Number(document.getElementById("c-maxturns").value) || 0,
           assign: document.getElementById("c-run").checked,
         }),
       });
-      ["c-title", "c-desc", "c-assignee"].forEach((id) => (document.getElementById(id).value = ""));
+      ["c-title", "c-desc", "c-assignee", "c-verify", "c-maxturns"].forEach((id) => (document.getElementById(id).value = ""));
       document.getElementById("c-run").checked = false;
       cm.classList.add("hidden");
       loadBoard();

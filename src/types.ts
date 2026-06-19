@@ -14,6 +14,8 @@ export interface Ticket {
   type: TicketType;
   assignee: string;
   queued: number;
+  verify_cmd: string;
+  max_turns: number;
   source: TicketSource;
   created_by: string;
   slack_channel: string | null;

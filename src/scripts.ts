@@ -22,7 +22,8 @@ export function runScript(body: string): Promise<ExecResult> {
     const start = Date.now();
     const child = spawn("bash", ["-c", body], {
       cwd: config.workspace,
-      env: { PATH: process.env.PATH, HOME: process.env.HOME, LANG: process.env.LANG ?? "C.UTF-8" },
+      // Prepend the isolated node-24 bin so verify commands / scripts can use node + npm.
+      env: { PATH: `/opt/node24/bin:${process.env.PATH ?? ""}`, HOME: process.env.HOME, LANG: process.env.LANG ?? "C.UTF-8" },
     });
 
     let stdout = "";

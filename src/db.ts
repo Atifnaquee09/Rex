@@ -29,6 +29,8 @@ db.exec(`
     type TEXT NOT NULL DEFAULT 'task',
     assignee TEXT NOT NULL DEFAULT '',
     queued INTEGER NOT NULL DEFAULT 0,
+    verify_cmd TEXT NOT NULL DEFAULT '',
+    max_turns INTEGER NOT NULL DEFAULT 0,
     source TEXT NOT NULL DEFAULT 'dashboard',
     created_by TEXT NOT NULL DEFAULT 'unknown',
     slack_channel TEXT,
@@ -112,12 +114,14 @@ try {
   /* column already exists */
 }
 
-// Migrations for tickets created before the Jira-style fields existed.
+// Migrations for tickets created before the Jira-style + reliability fields existed.
 for (const stmt of [
   "ALTER TABLE tickets ADD COLUMN priority TEXT NOT NULL DEFAULT 'medium'",
   "ALTER TABLE tickets ADD COLUMN type TEXT NOT NULL DEFAULT 'task'",
   "ALTER TABLE tickets ADD COLUMN assignee TEXT NOT NULL DEFAULT ''",
   "ALTER TABLE tickets ADD COLUMN queued INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE tickets ADD COLUMN verify_cmd TEXT NOT NULL DEFAULT ''",
+  "ALTER TABLE tickets ADD COLUMN max_turns INTEGER NOT NULL DEFAULT 0",
 ]) {
   try {
     db.exec(stmt);
@@ -235,10 +239,12 @@ export function createTicket(input: {
   type?: TicketType;
   assignee?: string;
   queued?: boolean;
+  verify_cmd?: string;
+  max_turns?: number;
 }): Ticket {
   const stmt = db.prepare(`
-    INSERT INTO tickets (title, description, status, priority, type, assignee, queued, source, created_by, slack_channel, slack_thread_ts)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO tickets (title, description, status, priority, type, assignee, queued, verify_cmd, max_turns, source, created_by, slack_channel, slack_thread_ts)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const info = stmt.run(
     input.title,
@@ -248,6 +254,8 @@ export function createTicket(input: {
     input.type ?? "task",
     input.assignee ?? "",
     input.queued ? 1 : 0,
+    input.verify_cmd ?? "",
+    input.max_turns ?? 0,
     input.source ?? "dashboard",
     input.created_by ?? "unknown",
     input.slack_channel ?? null,
@@ -260,11 +268,11 @@ const PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, medium: 2, l
 
 export function updateTicket(
   id: number,
-  fields: Partial<Pick<Ticket, "status" | "priority" | "type" | "assignee">>,
+  fields: Partial<Pick<Ticket, "status" | "priority" | "type" | "assignee" | "verify_cmd" | "max_turns">>,
 ): Ticket | undefined {
   const sets: string[] = [];
   const vals: unknown[] = [];
-  for (const k of ["status", "priority", "type", "assignee"] as const) {
+  for (const k of ["status", "priority", "type", "assignee", "verify_cmd", "max_turns"] as const) {
     if (fields[k] !== undefined) {
       sets.push(`${k} = ?`);
       vals.push(fields[k]);

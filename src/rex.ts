@@ -309,7 +309,7 @@ Work this ticket to completion in the current repository.`;
       options: {
         cwd: config.workspace,
         model: config.model,
-        maxTurns: config.maxTurns,
+        maxTurns: ticket.max_turns > 0 ? ticket.max_turns : config.maxTurns,
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
         // Autonomy with guardrails: Rex can do its job, but cannot push or nuke the repo.

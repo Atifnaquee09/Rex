@@ -51,7 +51,7 @@ export function startServer(): void {
 
   // Create ticket (optionally queue it for Rex immediately)
   app.post("/api/tickets", (req, res) => {
-    const { title, description, assign, priority, type, assignee } = req.body ?? {};
+    const { title, description, assign, priority, type, assignee, verify_cmd, max_turns } = req.body ?? {};
     if (!title || typeof title !== "string") {
       res.status(400).json({ error: "title is required" });
       return;
@@ -62,6 +62,8 @@ export function startServer(): void {
       priority: PRIORITIES.includes(priority) ? priority : "medium",
       type: TYPES.includes(type) ? type : "task",
       assignee: typeof assignee === "string" ? assignee.trim() : "",
+      verify_cmd: typeof verify_cmd === "string" ? verify_cmd.trim() : "",
+      max_turns: Number.isFinite(max_turns) ? Math.max(0, Math.min(200, Number(max_turns))) : 0,
       source: "dashboard",
       created_by: "dashboard",
       status: "todo",
@@ -77,12 +79,14 @@ export function startServer(): void {
       res.status(404).json({ error: "not found" });
       return;
     }
-    const { status, priority, type, assignee } = req.body ?? {};
-    const fields: Record<string, string> = {};
+    const { status, priority, type, assignee, verify_cmd, max_turns } = req.body ?? {};
+    const fields: Record<string, string | number> = {};
     if (typeof status === "string" && STATUSES.includes(status)) fields.status = status;
     if (typeof priority === "string" && PRIORITIES.includes(priority)) fields.priority = priority;
     if (typeof type === "string" && TYPES.includes(type)) fields.type = type;
     if (typeof assignee === "string") fields.assignee = assignee.trim();
+    if (typeof verify_cmd === "string") fields.verify_cmd = verify_cmd.trim();
+    if (Number.isFinite(max_turns)) fields.max_turns = Math.max(0, Math.min(200, Number(max_turns)));
     res.json(updateTicket(id, fields as any));
   });
 
