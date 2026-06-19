@@ -339,9 +339,14 @@ async function handleInbound(args: {
   // Otherwise let Rex decide: real work -> ticket, relay -> notify a person, conversation -> reply.
   // If we know who this is (team profile), pass their role so Rex adapts deterministically.
   const person = getPersonBySlackId(args.user);
-  const profile = person ? { name: person.name, role: person.role, notes: person.notes } : undefined;
+  let profile = person ? { name: person.name, role: person.role, notes: person.notes } : undefined;
   // Greetings/short messages skip the expensive Slack fetches (thread history + member roster).
   const trivial = isTrivial(text);
+  // Even without a stored profile, resolve the speaker's Slack name so Rex always knows who it's talking to.
+  if (!profile && !trivial) {
+    const name = await userLabel(args.user, args.botUserId);
+    if (name && !/^(teammate|someone|Rex)\b/i.test(name)) profile = { name, role: "business", notes: "" };
+  }
   const context = trivial ? "" : await threadContext(args.channel, args.threadTs, args.botUserId);
   const members = trivial ? "" : await channelRoster(args.channel, args.botUserId);
   const decision = await triage(text, profile, context, members);

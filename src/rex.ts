@@ -234,10 +234,16 @@ export const webCanUseTool: CanUseTool = async (toolName, input) => {
   return { behavior: "deny", message: `Tool ${toolName} is not permitted here.` };
 };
 
-/** Trivial messages (greetings, very short) skip the expensive context-gathering to save tokens/API calls. */
+/** Pure greetings/acks skip context-gathering to save tokens. Questions/requests NEVER count as trivial. */
 export function isTrivial(text: string): boolean {
   const t = text.trim();
-  return t.length < 12 || /^(hi|hey|hello|yo|sup|thanks|thank you|ty|ok|okay|k|cool|nice|gm|gn|good (morning|night|evening|afternoon))\b/i.test(t);
+  if (t.includes("?")) return false; // any question needs full context
+  if (/\b(who|what|when|where|why|how|which|whose|tell|explain|show|list|review|status|update|remember|know|did|are you|do you|can you)\b/i.test(t)) return false;
+  // Greetings / acknowledgements only.
+  return (
+    /^(hi+|hey+|hello|yo|sup|thanks|thank you|thx|ty|ok|okay|k|kk|cool|nice|great|got it|gm|gn|good (morning|night|evening|afternoon)|lol|haha|np|yep|yeah|sure)\b[\s!.…]*$/i.test(t) ||
+    t.length <= 3
+  );
 }
 
 /** Sanitise a single user-entered field (name/title/notes) before placing it in the system prompt. */
@@ -273,10 +279,10 @@ export async function triage(message: string, profile?: SpeakerProfile, context?
   let kbBlock = "";
   if (kbEnabled && !trivial) {
     try {
-      const hits = (await searchKnowledge(message, 6)).filter((h) => (h.similarity ?? 0) > 0.28);
+      const hits = (await searchKnowledge(message, 6)).filter((h) => (h.similarity ?? 0) > 0.4);
       if (hits.length) {
         kbBlock = sanitizeContext(
-          "Your memory about the user's projects/work (USE this to answer — do NOT claim you lack memory of anything shown here):\n" +
+          "Your memory about the user's projects/work — USE this to answer; do NOT claim you lack memory of anything shown here. Answer ONLY about the specific project/topic asked; do NOT mix in or compare other projects unless explicitly asked (some notes below may mention other projects — ignore those):\n" +
             hits.map((h) => `- ${h.content.replace(/\s+/g, " ").slice(0, 700)}`).join("\n"),
         );
       }
@@ -386,10 +392,10 @@ export async function chatReply(message: string): Promise<string> {
   let kb = "";
   if (kbEnabled && !isTrivial(message)) {
     try {
-      const hits = (await searchKnowledge(message, 6)).filter((h) => (h.similarity ?? 0) > 0.28);
+      const hits = (await searchKnowledge(message, 6)).filter((h) => (h.similarity ?? 0) > 0.4);
       if (hits.length) {
         kb = sanitizeContext(
-          "Your memory about the user's projects/work (USE this — don't claim you lack memory of anything shown here):\n" +
+          "Your memory about the user's projects/work — USE this; don't claim you lack memory of anything shown here. Answer ONLY about the specific project/topic asked; do NOT mix in other projects unless explicitly asked (ignore any unrelated-project notes below):\n" +
             hits.map((h) => `- ${h.content.replace(/\s+/g, " ").slice(0, 700)}`).join("\n"),
         );
       }
@@ -418,9 +424,9 @@ export async function consideredReply(message: string, profile?: SpeakerProfile,
   let kb = "";
   if (kbEnabled) {
     try {
-      const hits = (await searchKnowledge(message, 6)).filter((h) => (h.similarity ?? 0) > 0.28);
+      const hits = (await searchKnowledge(message, 6)).filter((h) => (h.similarity ?? 0) > 0.4);
       if (hits.length) {
-        kb = sanitizeContext("Your memory about the user's projects/work (USE this — don't claim ignorance of anything shown here):\n" + hits.map((h) => `- ${h.content.replace(/\s+/g, " ").slice(0, 700)}`).join("\n"));
+        kb = sanitizeContext("Your memory about the user's projects/work — USE this; don't claim ignorance of anything shown here. Answer ONLY about the specific project/topic asked; do NOT mix in other projects unless explicitly asked (ignore any unrelated-project notes below):\n" + hits.map((h) => `- ${h.content.replace(/\s+/g, " ").slice(0, 700)}`).join("\n"));
       }
     } catch {
       /* memory optional */
