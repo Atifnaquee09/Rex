@@ -304,7 +304,7 @@ ${message}`
     : message;
   let out = "";
   try {
-    out = await modelText(prompt, { model: "sonnet", systemPrompt: system, allowedTools: [], maxTurns: 1 });
+    out = await modelText(prompt, { model: "sonnet", systemPrompt: system, allowedTools: [], maxTurns: 6 });
   } catch {
     return { kind: "chat", reply: "Sorry, I had a brief hiccup just now — say that again and I'll pick it right up." };
   }
@@ -354,7 +354,7 @@ Examples:
 export async function parseAdminIntent(rawMessage: string): Promise<AdminIntent> {
   let out = "";
   try {
-    out = await modelText(rawMessage, { model: "sonnet", systemPrompt: ADMIN_SYSTEM, allowedTools: [], maxTurns: 1 });
+    out = await modelText(rawMessage, { model: "sonnet", systemPrompt: ADMIN_SYSTEM, allowedTools: [], maxTurns: 4 });
   } catch {
     return { action: "none" };
   }
@@ -405,7 +405,7 @@ export async function chatReply(message: string): Promise<string> {
     .filter(Boolean)
     .join("\n\n");
   try {
-    const out = await modelText(message, { model: "sonnet", systemPrompt: system, allowedTools: [], maxTurns: 1 });
+    const out = await modelText(message, { model: "sonnet", systemPrompt: system, allowedTools: [], maxTurns: 6 });
     return out || "…";
   } catch {
     return "I hit a brief hiccup — try that again.";
