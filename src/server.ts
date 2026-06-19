@@ -28,6 +28,7 @@ import {
 } from "./db.ts";
 import { runScript } from "./scripts.ts";
 import { kbEnabled, addKnowledge, listKnowledge, searchKnowledge, deleteKnowledge } from "./knowledge.ts";
+import { chatReply } from "./rex.ts";
 import type { PersonRole } from "./types.ts";
 
 const ROLES: PersonRole[] = ["exec", "business", "technical"];
@@ -116,6 +117,20 @@ export function startServer(): void {
   // Token burn + cost + counts
   app.get("/api/stats", (_req, res) => {
     res.json(stats());
+  });
+
+  // Terminal chat — plain text in, plain text out (used by the `rex` CLI).
+  app.post("/api/chat", express.text({ type: "*/*", limit: "100kb" }), async (req, res) => {
+    const msg = typeof req.body === "string" ? req.body.trim() : "";
+    if (!msg) {
+      res.type("text/plain").send("(empty message)");
+      return;
+    }
+    try {
+      res.type("text/plain").send(await chatReply(msg));
+    } catch {
+      res.type("text/plain").send("Rex hit an error. Try again.");
+    }
   });
 
   // --- Shell scripts ---

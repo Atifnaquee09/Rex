@@ -253,6 +253,38 @@ export async function parseAdminIntent(rawMessage: string): Promise<AdminIntent>
   }
 }
 
+/** Conversational reply for the terminal CLI — Rex's persona + memory recall, no ticket routing. */
+export async function chatReply(message: string): Promise<string> {
+  const persona = getSetting("persona", "You are Rex.");
+  let kb = "";
+  if (kbEnabled && !isTrivial(message)) {
+    try {
+      const hits = (await searchKnowledge(message, 4)).filter((h) => (h.similarity ?? 0) > 0.35);
+      if (hits.length) {
+        kb = sanitizeContext(
+          "Relevant memory (project notes; use if helpful):\n" +
+            hits.map((h) => `- ${h.content.replace(/\s+/g, " ").slice(0, 700)}`).join("\n"),
+        );
+      }
+    } catch {
+      /* memory optional */
+    }
+  }
+  const system = [
+    persona,
+    "You're chatting with someone in a terminal. Reply naturally and helpfully, like a normal person. Keep it concise unless real detail is needed.",
+    kb,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  try {
+    const out = await modelText(message, { model: "sonnet", systemPrompt: system, allowedTools: [], maxTurns: 1 });
+    return out || "…";
+  } catch {
+    return "I hit a brief hiccup — try that again.";
+  }
+}
+
 export async function runTicket(ticket: Ticket, runId: number, sink: EventSink): Promise<RunOutcome> {
   const prompt = `# Ticket #${ticket.id}: ${ticket.title}
 
