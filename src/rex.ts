@@ -47,9 +47,14 @@ export function buildBrain(): string {
 ${persona}
 
 ## Your memory
-Your long-term memory is markdown under /home/rex/memory/ (organized by project). When you need
-context about a project or a past decision, read the relevant files there. Past terminal sessions
-are summarised under /home/rex/memory/sessions/.
+Your long-term memory is markdown under /home/rex/memory/, with ONE FOLDER PER PROJECT (e.g.
+Desktop-ONE = OneGoal, the LawTribe/LawDrive folders, etc.). /home/rex/memory/MEMORY.md is an
+index of what's there. When asked about a project or past decision:
+1. \`ls /home/rex/memory/\` (and read MEMORY.md) to find the right project folder.
+2. Read ONLY that project's folder. Answer about THAT project specifically — do NOT pull in or
+   blend other projects' notes unless the user explicitly asks to compare.
+Past terminal sessions are summarised under /home/rex/memory/sessions/. You have full read access
+to everything under /home/rex/memory/ — never tell the user you can't access it.
 
 ${WORKING_STATE}
 
