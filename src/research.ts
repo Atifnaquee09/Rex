@@ -5,8 +5,10 @@ const RESEARCH_SYSTEM = `You are Rex, a sharp, skeptical research analyst. Resea
 THOROUGHLY using web search and by fetching real sources.
 
 Method (this is what makes the report trustworthy):
-- Search from multiple angles; open and read several real sources — do not rely on one.
-- Cross-check key facts/figures across sources. If sources disagree, say so.
+- Be EFFICIENT: do about 4–6 targeted web searches total, open a few key sources — then STOP
+  searching and write. Do not over-search; you have a limited number of steps.
+- Use multiple angles and don't rely on a single source; cross-check key facts. If sources
+  disagree, say so.
 - Be concrete: real numbers, names, dates. No vague filler. No invented facts — if you can't
   verify something, say it's uncertain.
 
@@ -28,7 +30,7 @@ export async function runResearch(topic: string): Promise<string> {
       model: "sonnet",
       systemPrompt: RESEARCH_SYSTEM,
       allowedTools: ["WebSearch", "WebFetch"],
-      maxTurns: 20,
+      maxTurns: 12,
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
     },
@@ -47,7 +49,7 @@ function deriveTitle(md: string, fallback: string): string {
 /** Create a pending artifact, run the research async (bounded by a timeout), fill it when done. */
 export function startResearch(topic: string): string {
   const id = createArtifact({ kind: "research", title: topic.slice(0, 120), query: topic });
-  const timeout = new Promise<string>((_, rej) => setTimeout(() => rej(new Error("research timed out (8 min)")), 8 * 60_000));
+  const timeout = new Promise<string>((_, rej) => setTimeout(() => rej(new Error("research timed out (6 min)")), 6 * 60_000));
   Promise.race([runResearch(topic), timeout])
     .then((md) => setArtifact(id, { status: "ready", content_md: md, title: deriveTitle(md, topic) }))
     .catch((e) => setArtifact(id, { status: "error", content_md: `Research failed: ${e instanceof Error ? e.message : String(e)}` }));
