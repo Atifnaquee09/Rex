@@ -1,6 +1,6 @@
 import { App } from "@slack/bolt";
 import { config } from "./config.ts";
-import { createTicket, getPersonBySlackId, getSetting } from "./db.ts";
+import { createTicket, getPersonBySlackId, getSetting, setSetting } from "./db.ts";
 import { triage, parseAdminIntent, isTrivial, consideredReply } from "./rex.ts";
 import { startResearch } from "./research.ts";
 import type { Ticket } from "./types.ts";
@@ -85,20 +85,6 @@ async function channelRoster(channel: string, botUserId?: string): Promise<strin
   }
 }
 
-// Only Slack workspace admins/owners may command destructive admin actions.
-const adminCache = new Map<string, boolean>();
-async function isWorkspaceAdmin(uid: string): Promise<boolean> {
-  if (adminCache.has(uid)) return adminCache.get(uid)!;
-  try {
-    const r: any = await app!.client.users.info({ user: uid });
-    const ok = !!(r.user?.is_admin || r.user?.is_owner || r.user?.is_primary_owner);
-    adminCache.set(uid, ok);
-    return ok;
-  } catch {
-    return false;
-  }
-}
-
 // Resolve a job-title keyword (e.g. "developer") to the Slack user ids whose profile title matches.
 async function usersByTitle(keyword: string, botUserId?: string): Promise<string[]> {
   if (!app || !keyword) return [];
@@ -120,6 +106,7 @@ const uniq = (a: string[]) => [...new Set(a)];
 async function handleAdmin(
   args: { channel: string; threadTs: string; user: string; botUserId?: string; text: string; say: (m: any) => Promise<any> },
   text: string,
+  isOwner: boolean,
 ): Promise<boolean> {
   if (!app) return false;
   // Pre-filter: need an admin VERB *and* a channel/member context signal, so normal coding chat
@@ -133,8 +120,8 @@ async function handleAdmin(
   const intent = await parseAdminIntent(args.text);
   if (intent.action === "none") return false;
 
-  if (!(await isWorkspaceAdmin(args.user))) {
-    await args.say({ thread_ts: args.threadTs, text: ":lock: Only a workspace admin can ask me to add/remove people or manage channels." });
+  if (!isOwner) {
+    await args.say({ thread_ts: args.threadTs, text: ":lock: Only my owner can ask me to add/remove people or manage channels." });
     return true;
   }
 
@@ -274,6 +261,22 @@ async function handleInbound(args: {
     return;
   }
 
+  // Authorization wall. The owner is the only one who can command/train me or receive credentials.
+  const owner = getSetting("owner_slack_id", "");
+  const isOwner = !!owner && args.user === owner;
+  // Owner-claim / identity. First person to run `whoami` (when no owner is set) becomes the owner.
+  if (/^\s*(whoami|claim[\s-]?owner|who am i)\s*\??\s*$/i.test(text)) {
+    if (!owner) {
+      setSetting("owner_slack_id", args.user);
+      await args.say({ thread_ts: args.threadTs, text: `:lock: Locked in. You (<@${args.user}>, \`${args.user}\`) are now my owner. From now on, only you can command or train me, and only you can get credentials from me. Everyone else I help, but I take no orders and share no secrets.` });
+    } else if (isOwner) {
+      await args.say({ thread_ts: args.threadTs, text: `You're my owner. Your Slack ID is \`${args.user}\`.` });
+    } else {
+      await args.say({ thread_ts: args.threadTs, text: `Your Slack ID is \`${args.user}\`. (My owner is already set — I take commands and share credentials only with them.)` });
+    }
+    return;
+  }
+
   // Research request → kick off a web-research job; reply with a link that fills in when ready.
   const rm = text.match(/^research[:\s]+(.+)/is);
   if (rm) {
@@ -296,7 +299,7 @@ async function handleInbound(args: {
     const person = getPersonBySlackId(args.user);
     const profile = person ? { name: person.name, role: person.role, notes: person.notes } : undefined;
     const ctx = await threadContext(args.channel, args.threadTs, args.botUserId);
-    consideredReply(unwrapped, profile, ctx)
+    consideredReply(unwrapped, profile, ctx, isOwner)
       .then((reply) => args.say({ thread_ts: args.threadTs, text: reply }))
       .catch(() => args.say({ thread_ts: args.threadTs, text: "I hit a snag working through that — mind resending it?" }));
     return;
@@ -313,9 +316,9 @@ async function handleInbound(args: {
     .map((m) => m[1])
     .filter((id) => id !== args.botUserId && id !== args.user);
 
-  // Admin actions (add/remove members, create/archive channels) — gated to workspace admins.
+  // Admin actions (add/remove members, create/archive channels) — gated to the OWNER only.
   // Checked before relay so "remove @X" isn't treated as a message relay.
-  if (await handleAdmin(args, text)) return;
+  if (await handleAdmin(args, text, isOwner)) return;
 
   // Relay (deterministic): if the user @-mentions a real person (not Rex or themselves), treat
   // it as "deliver this message to them". Strip leading filler words to get the actual message.
@@ -349,7 +352,7 @@ async function handleInbound(args: {
   }
   const context = trivial ? "" : await threadContext(args.channel, args.threadTs, args.botUserId);
   const members = trivial ? "" : await channelRoster(args.channel, args.botUserId);
-  const decision = await triage(text, profile, context, members);
+  const decision = await triage(text, profile, context, members, isOwner);
 
   if (decision.kind === "relay") {
     // Targets = everyone @-mentioned in the raw message except Rex and the sender.
