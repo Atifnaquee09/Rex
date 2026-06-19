@@ -28,7 +28,7 @@ export async function runResearch(topic: string): Promise<string> {
       model: "sonnet",
       systemPrompt: RESEARCH_SYSTEM,
       allowedTools: ["WebSearch", "WebFetch"],
-      maxTurns: 40,
+      maxTurns: 20,
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
     },
@@ -44,10 +44,11 @@ function deriveTitle(md: string, fallback: string): string {
   return (h ? h[1] : fallback).replace(/[#*`]/g, "").trim().slice(0, 120) || "Research report";
 }
 
-/** Create a pending artifact, run the research async, fill it when done. Returns the artifact id. */
+/** Create a pending artifact, run the research async (bounded by a timeout), fill it when done. */
 export function startResearch(topic: string): string {
   const id = createArtifact({ kind: "research", title: topic.slice(0, 120), query: topic });
-  runResearch(topic)
+  const timeout = new Promise<string>((_, rej) => setTimeout(() => rej(new Error("research timed out (8 min)")), 8 * 60_000));
+  Promise.race([runResearch(topic), timeout])
     .then((md) => setArtifact(id, { status: "ready", content_md: md, title: deriveTitle(md, topic) }))
     .catch((e) => setArtifact(id, { status: "error", content_md: `Research failed: ${e instanceof Error ? e.message : String(e)}` }));
   return id;
