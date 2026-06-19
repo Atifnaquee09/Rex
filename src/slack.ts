@@ -265,7 +265,7 @@ async function handleInbound(args: {
   const owner = getSetting("owner_slack_id", "");
   const isOwner = !!owner && args.user === owner;
   // Owner-claim / identity. First person to run `whoami` (when no owner is set) becomes the owner.
-  if (/^\s*(whoami|claim[\s-]?owner|who am i)\s*\??\s*$/i.test(text)) {
+  if (/^\s*(who\s*a?m\s*i|whoami|whomi|claim[\s-]?owner|make me (the )?owner|i'?m (the )?owner|i am (the )?owner|register me as (the )?owner)\s*\??\s*$/i.test(text)) {
     if (!owner) {
       // Harden trust-on-first-use: only a Slack workspace owner/admin may claim Rex as its owner,
       // so a random member can't grab ownership before the real operator does.
