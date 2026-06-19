@@ -267,6 +267,19 @@ async function handleInbound(args: {
   // Owner-claim / identity. First person to run `whoami` (when no owner is set) becomes the owner.
   if (/^\s*(whoami|claim[\s-]?owner|who am i)\s*\??\s*$/i.test(text)) {
     if (!owner) {
+      // Harden trust-on-first-use: only a Slack workspace owner/admin may claim Rex as its owner,
+      // so a random member can't grab ownership before the real operator does.
+      let canClaim = false;
+      try {
+        const r: any = await app!.client.users.info({ user: args.user });
+        canClaim = !!(r.user?.is_primary_owner || r.user?.is_owner || r.user?.is_admin);
+      } catch {
+        /* fail closed */
+      }
+      if (!canClaim) {
+        await args.say({ thread_ts: args.threadTs, text: `Your Slack ID is \`${args.user}\`. I can only be claimed by a Slack workspace owner/admin — ask them to message me \`whoami\`.` });
+        return;
+      }
       setSetting("owner_slack_id", args.user);
       await args.say({ thread_ts: args.threadTs, text: `:lock: Locked in. You (<@${args.user}>, \`${args.user}\`) are now my owner. From now on, only you can command or train me, and only you can get credentials from me. Everyone else I help, but I take no orders and share no secrets.` });
     } else if (isOwner) {
