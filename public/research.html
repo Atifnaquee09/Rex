@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rex — Research</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}.mono{font-family:ui-monospace,Menlo,monospace}</style>
+</head>
+<body class="bg-zinc-950 text-zinc-200 min-h-screen">
+  <div class="max-w-3xl mx-auto p-6">
+    <header class="flex items-center justify-between mb-6">
+      <div class="flex items-center gap-3">
+        <div class="h-10 w-10 rounded-lg bg-gradient-to-br from-indigo-500 to-fuchsia-600 grid place-items-center font-black text-white">R</div>
+        <div>
+          <h1 class="text-xl font-bold text-white leading-none">Rex — Research</h1>
+          <p class="text-xs text-zinc-500 mt-1">Web research → a shareable report page that lives 24h</p>
+        </div>
+      </div>
+      <nav class="flex gap-2 text-sm flex-wrap">
+        <a href="/" class="px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300">Board</a>
+        <a href="/research.html" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white">Research</a>
+        <a href="/knowledge.html" class="px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300">Knowledge</a>
+        <a href="/architecture.html" class="px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300">Architecture</a>
+        <a href="/settings.html" class="px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300">Settings</a>
+      </nav>
+    </header>
+
+    <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-4 mb-6">
+      <textarea id="q" rows="3" placeholder="What should Rex research? e.g. 'the 2026 EV battery market — key players, costs, and what's next'"
+        class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm mb-3 outline-none focus:border-indigo-500"></textarea>
+      <button id="go" class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg px-5 py-2">Research it</button>
+      <span id="status" class="text-xs text-zinc-400 ml-3"></span>
+    </div>
+
+    <h2 class="text-sm font-semibold text-white mb-2">Recent reports <span class="text-zinc-600 text-xs">(auto-expire after 24h)</span></h2>
+    <div id="list" class="space-y-2 text-sm"></div>
+  </div>
+
+  <script>
+    const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    async function load() {
+      const items = await fetch("/api/artifacts").then((r) => r.json());
+      const el = document.getElementById("list");
+      if (!items.length) { el.innerHTML = '<p class="text-xs text-zinc-600">No reports yet.</p>'; return; }
+      el.innerHTML = items.map((a) => `
+        <a href="/r/${a.id}" target="_blank" class="block rounded-lg border border-zinc-800 hover:border-zinc-700 px-3 py-2">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-white truncate">${esc(a.title || a.id)}</span>
+            <span class="text-[10px] px-2 py-0.5 rounded-full ${a.status === "ready" ? "bg-emerald-500/20 text-emerald-300" : a.status === "error" ? "bg-rose-500/20 text-rose-300" : "bg-amber-500/20 text-amber-300 animate-pulse"}">${a.status}</span>
+          </div>
+          <div class="text-[10px] text-zinc-600 mono mt-1">${esc(a.created_at)} UTC</div>
+        </a>`).join("");
+    }
+    document.getElementById("go").addEventListener("click", async () => {
+      const query = document.getElementById("q").value.trim();
+      if (!query) return;
+      const s = document.getElementById("status"); s.textContent = "starting…";
+      const r = await fetch("/api/research", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query }) }).then((x) => x.json());
+      if (r.url) { s.innerHTML = `report: <a class="text-indigo-400" href="${r.url}" target="_blank">${r.url}</a> (fills in shortly)`; document.getElementById("q").value = ""; }
+      else s.textContent = r.error || "error";
+      load();
+    });
+    load();
+    setInterval(load, 5000);
+  </script>
+</body>
+</html>

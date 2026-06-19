@@ -29,6 +29,8 @@ import {
 import { runScript } from "./scripts.ts";
 import { kbEnabled, addKnowledge, listKnowledge, searchKnowledge, deleteKnowledge } from "./knowledge.ts";
 import { chatReply } from "./rex.ts";
+import { getArtifact, listArtifacts, type Artifact } from "./artifacts.ts";
+import { startResearch } from "./research.ts";
 import type { PersonRole } from "./types.ts";
 
 const ROLES: PersonRole[] = ["exec", "business", "technical"];
@@ -38,6 +40,61 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const STATUSES = ["backlog", "todo", "in_progress", "in_review", "done"];
 const PRIORITIES = ["low", "medium", "high", "urgent"];
 const TYPES = ["task", "bug", "feature"];
+
+const htmlEsc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+
+function shell(title: string, body: string, head = ""): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>${htmlEsc(title)}</title>${head}
+<style>body{margin:0;background:#0a0a0a;color:#d4d4d8;font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.6}
+.wrap{max-width:820px;margin:0 auto;padding:40px 24px}
+.bar{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.logo{height:34px;width:34px;border-radius:8px;background:linear-gradient(135deg,#6366f1,#d946ef);display:grid;place-items:center;font-weight:900;color:#fff}
+.muted{color:#71717a;font-size:13px} h1,h2,h3{color:#fff;line-height:1.3} h1{font-size:1.7rem} h2{font-size:1.3rem;margin-top:1.6em;border-top:1px solid #27272a;padding-top:.8em} h3{font-size:1.1rem}
+a{color:#818cf8} code{background:#18181b;border:1px solid #27272a;border-radius:4px;padding:1px 5px;font-family:ui-monospace,Menlo,monospace;font-size:.9em}
+pre{background:#000;border:1px solid #27272a;border-radius:8px;padding:14px;overflow:auto} pre code{border:0;background:none;padding:0}
+ul,ol{padding-left:22px} blockquote{border-left:3px solid #3f3f46;padding-left:12px;color:#a1a1aa;margin:.6em 0}
+table{border-collapse:collapse;width:100%;margin:1em 0} th,td{border:1px solid #27272a;padding:6px 10px;text-align:left} th{background:#18181b;color:#fff}
+hr{border:0;border-top:1px solid #27272a;margin:2em 0}</style></head>
+<body><div class="wrap">${body}</div></body></html>`;
+}
+
+function renderArtifactPage(a?: Artifact): string {
+  if (!a) {
+    return shell("Expired", `<div class="bar"><div class="logo">R</div><strong>Rex</strong></div>
+      <h1>Link not found or expired</h1><p class="muted">Reports are available for 24 hours, then they're deleted.</p>`);
+  }
+  if (a.status === "error") {
+    return shell("Research failed", `<div class="bar"><div class="logo">R</div><strong>Rex</strong></div>
+      <h1>Research failed</h1><pre>${htmlEsc(a.content_md)}</pre>`);
+  }
+  if (a.status === "pending") {
+    return shell(
+      "Researching…",
+      `<div class="bar"><div class="logo">R</div><strong>Rex</strong></div>
+       <h1>Researching…</h1>
+       <p class="muted">Rex is searching the web and writing your report on:</p>
+       <p><strong>${htmlEsc(a.query)}</strong></p>
+       <p class="muted">This page refreshes itself — usually ready in a few minutes.</p>`,
+      `<meta http-equiv="refresh" content="8">`,
+    );
+  }
+  // ready — render the markdown client-side (sanitised), from a base64 blob (no injection breakout).
+  const b64 = Buffer.from(a.content_md, "utf8").toString("base64");
+  const expires = a.expires_at;
+  return shell(
+    a.title || "Research report",
+    `<div class="bar"><div class="logo">R</div><strong>Rex</strong><span class="muted">· research</span></div>
+     <p class="muted">Generated ${htmlEsc(a.created_at)} UTC · link expires ${htmlEsc(expires)} UTC</p>
+     <div id="report">Rendering…</div>`,
+    `<script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+     <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+     <script>
+       const md = new TextDecoder().decode(Uint8Array.from(atob("${b64}"), c => c.charCodeAt(0)));
+       document.getElementById("report").innerHTML = DOMPurify.sanitize(marked.parse(md));
+     </script>`,
+  );
+}
 
 export function startServer(): void {
   const app = express();
@@ -121,6 +178,28 @@ export function startServer(): void {
   // Token burn + cost + counts
   app.get("/api/stats", (_req, res) => {
     res.json(stats());
+  });
+
+  // --- Research → time-boxed artifact pages ---
+
+  app.post("/api/research", (req, res) => {
+    const q = (req.body?.query ?? "").toString().trim();
+    if (!q) {
+      res.status(400).json({ error: "query is required" });
+      return;
+    }
+    const id = startResearch(q);
+    res.status(201).json({ id, url: `${config.publicUrl}/r/${id}` });
+  });
+
+  app.get("/api/artifacts", (_req, res) => {
+    res.json(listArtifacts());
+  });
+
+  // Public, shareable artifact page (nginx serves /r/ without Basic Auth).
+  app.get("/r/:id", (req, res) => {
+    const a = getArtifact(req.params.id);
+    res.type("html").status(a ? 200 : 404).send(renderArtifactPage(a));
   });
 
   // Terminal chat — plain text in, plain text out (used by the `rex` CLI).

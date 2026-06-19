@@ -2,6 +2,7 @@ import { App } from "@slack/bolt";
 import { config } from "./config.ts";
 import { createTicket, getPersonBySlackId, getSetting } from "./db.ts";
 import { triage, parseAdminIntent, isTrivial } from "./rex.ts";
+import { startResearch } from "./research.ts";
 import type { Ticket } from "./types.ts";
 
 let app: App | null = null;
@@ -270,6 +271,18 @@ async function handleInbound(args: {
   const text = stripMention(args.text);
   if (!text) {
     await args.say({ thread_ts: args.threadTs, text: "Hey — I'm Rex. Tell me what to build or fix, or use `title :: description` to file work directly." });
+    return;
+  }
+
+  // Research request → kick off a web-research job; reply with a link that fills in when ready.
+  const rm = text.match(/^research[:\s]+(.+)/is);
+  if (rm) {
+    const topic = rm[1].trim();
+    const id = startResearch(topic);
+    await args.say({
+      thread_ts: args.threadTs,
+      text: `:mag: On it — researching *${topic.slice(0, 140)}*.\nReport (ready in a few minutes, lives 24h): ${config.publicUrl}/r/${id}`,
+    });
     return;
   }
 

@@ -24,6 +24,7 @@ export const config = {
   model: process.env.REX_MODEL || "opus",
   maxTurns: Number(process.env.REX_MAX_TURNS || 40),
   port: Number(process.env.PORT || 4000),
+  publicUrl: (process.env.PUBLIC_URL || "https://ardigitalnexus.com").replace(/\/$/, ""),
   // Bind localhost-only by default — safe on a public server (reach it via SSH tunnel
   // or a reverse proxy). Set HOST=0.0.0.0 only if you intentionally expose it.
   host: process.env.HOST || "127.0.0.1",
